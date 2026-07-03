@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>ระบบจัดการการเงินนักศึกษา | โครงการครูคืนถิ่น</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{font-family:'Prompt',sans-serif; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    min-height:100vh;
+    background: linear-gradient(160deg,#fdf2f8 0%,#f8fafc 35%,#fce7f3 65%,#eef1f5 100%);
+    background-attachment:fixed;
+    overflow-x:hidden;
+    color:#3f3244;
+  }
+  .blob{position:fixed;border-radius:9999px;filter:blur(90px);z-index:0;pointer-events:none;}
+  .glass{
+    background:rgba(255,255,255,.46);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border:1px solid rgba(255,255,255,.55);
+    box-shadow:0 8px 32px rgba(148,72,120,.14);
+  }
+  .glass-solid{
+    background:rgba(255,255,255,.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border:1px solid rgba(255,255,255,.7);
+  }
+  .glass-btn{
+    background:rgba(255,255,255,.5);
+    backdrop-filter: blur(10px);
+    border:1px solid rgba(255,255,255,.6);
+  }
+  ::-webkit-scrollbar{width:6px;height:6px;}
+  ::-webkit-scrollbar-thumb{background:rgba(219,39,119,.28);border-radius:9999px;}
+  .no-scrollbar::-webkit-scrollbar{display:none;}
+  .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+  @keyframes popIn{from{opacity:0;transform:scale(.92) translateY(10px);}to{opacity:1;transform:scale(1) translateY(0);}}
+  @keyframes slideDown{from{opacity:0;max-height:0;}to{opacity:1;max-height:600px;}}
+  .animate-in{animation:fadeUp .28s ease-out both;}
+  .animate-pop{animation:popIn .22s cubic-bezier(.2,.9,.3,1.2) both;}
+  .animate-fade{animation:fadeIn .18s ease-out both;}
+  .animate-slide{animation:slideDown .28s ease-out both;}
+  .modal-backdrop{background:rgba(35,20,32,.5);backdrop-filter:blur(6px);}
+  .tap{transition:transform .12s ease, box-shadow .12s ease;}
+  .tap:active{transform:scale(.95);}
+  .navicon{width:22px;height:22px;}
+  .segbar-seg{transition:width .5s cubic-bezier(.2,.8,.3,1);}
+  input[type=text], input[type=number], input[type=date], input[type=email], select, textarea{
+    outline:none;
+  }
+  input:focus, select:focus, textarea:focus{
+    box-shadow:0 0 0 3px rgba(236,72,153,.25);
+  }
+  .chip-scroll{scroll-snap-type:x proximity;}
+  .chip-scroll>*{scroll-snap-align:start;}
+  @media print{
+    body *{visibility:hidden;}
+    #print-area, #print-area *{visibility:visible;}
+    #print-area{position:absolute;left:0;top:0;width:100%;padding:24px;}
+    .no-print{display:none!important;}
+  }
+  #print-area{display:none;}
+</style>
+</head>
+<body>
+
+<div class="blob w-[420px] h-[420px] -top-24 -left-24 bg-pink-300/40"></div>
+<div class="blob w-[380px] h-[380px] top-1/3 -right-32 bg-slate-300/40"></div>
+<div class="blob w-[340px] h-[340px] bottom-0 left-1/4 bg-rose-200/50"></div>
+
+<div id="app" class="relative z-10"></div>
+<div id="modal-root" class="relative z-40"></div>
+<div id="print-area"></div>
+
+<script>
+/* =========================================================================
+   UTILITIES
+   ========================================================================= */
+let _uid = 1000;
+const uid = (p='id') => `${p}_${_uid++}`;
+const pad2 = n => String(n).padStart(2,'0');
+const isoDate = (y,m,d) => `${y}-${pad2(m)}-${pad2(d)}`;
+const TODAY = isoDate(2026,7,3);
+const THAI_MONTHS_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+const THAI_MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+function fmtMoney(n){
+  n = Number(n)||0;
+  const s = Math.abs(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  return (n<0?'-':'') + s;
+}
+function fmtDateShort(iso){ const [y,m,d]=iso.split('-').map(Number); return `${d} ${THAI_MONTHS_SHORT[m-1]} ${y+543}`; }
+function fmtDateFull(iso){ const [y,m,d]=iso.split('-').map(Number); return `${d} ${THAI_MONTHS_FULL[m-1]} พ.ศ.${y+543}`; }
+function monthKey(iso){ return iso.slice(0,7); }
+function monthLabel(key){ const [y,m]=key.split('-').map(Number); return `${THAI_MONTHS_FULL[m-1]} ${y+543}`; }
+function daysInMonth(key){ const [y,m]=key.split('-').map(Number); return new Date(y,m,0).getDate(); }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* =========================================================================
+   ICONS (inline stroke SVGs)
+   ========================================================================= */
+const ICON = {
+  home:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></svg>`,
+  transfer:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11l-3-3"/><path d="M17 17H6l3 3"/></svg>`,
+  income:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>`,
+  expense:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m5 12 7 7 7-7"/></svg>`,
+  more:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>`,
+  list:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
+  pie:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 15a9 9 0 1 1-9.2-9v9z"/><path d="M13 3.05A9 9 0 0 1 20.94 11H13z"/></svg>`,
+  report:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l3 3v15H6V6z"/><path d="M9 3v3H6"/><path d="M9 13h6M9 17h6M9 9h2"/></svg>`,
+  wallet:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="16" cy="14" r="1"/></svg>`,
+  plus:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`,
+  edit:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
+  trash:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>`,
+  close:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>`,
+  chevDown:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
+  chevLeft:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
+  printer:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="1.5"/><path d="M6 17v4h12v-4"/></svg>`,
+  user:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.5-4 5-5.5 7.5-5.5S18 16 19.5 20"/></svg>`,
+  users:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M2.5 20c1-3.5 3.7-5 6.5-5s5.5 1.5 6.5 5"/><circle cx="17" cy="8" r="2.5"/><path d="M16 15.2c2.2.4 3.7 1.8 4.5 4.3"/></svg>`,
+  shield:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3 7.7 8 9 5-1.3 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>`,
+  logout:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>`,
+  lock:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>`,
+  back:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M5 12h14"/></svg>`,
+  settings:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="12" cy="6" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></svg>`,
+  key:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="3.5"/><path d="M10.8 12.2 19 4M15 6l2.5 2.5M18 3l3 3"/></svg>`,
+};
+function icon(name, cls='navicon'){
+  const svg = (ICON[name]||'').replace('<svg ', '<svg style="width:100%;height:100%;display:block" ');
+  return `<span class="${cls}" style="display:inline-flex;align-items:center;justify-content:center;line-height:0">${svg}</span>`;
+}
+
+/* =========================================================================
+   STATIC REFERENCE DATA
+   ========================================================================= */
+const ACCOUNT_TYPES = {
+  cash:     {label:'บัญชีเงินสด',   icon:'💵', grad:'from-slate-400 to-slate-600',   hex:'#64748b', soft:'bg-slate-100 text-slate-600'},
+  spending: {label:'บัญชีใช้จ่าย',  icon:'💳', grad:'from-pink-400 to-pink-600',     hex:'#ec4899', soft:'bg-pink-100 text-pink-600'},
+  holding:  {label:'บัญชีพักเงิน',  icon:'🗂️', grad:'from-amber-400 to-amber-600',   hex:'#f59e0b', soft:'bg-amber-100 text-amber-600'},
+  savings:  {label:'บัญชีเงินเก็บ', icon:'🏦', grad:'from-emerald-400 to-emerald-600', hex:'#10b981', soft:'bg-emerald-100 text-emerald-600'},
+};
+const MAX_ACCOUNTS = 5;
+const MAX_EXPENSE_CATS = 10;
+const MAX_INCOME_CATS = 5;
+const CAT_COLORS = ['#ec4899','#64748b','#f59e0b','#10b981','#6366f1','#ef4444','#06b6d4','#a855f7','#84cc16','#f97316'];
+
+/* =========================================================================
+   SUPABASE CLIENT & RPC HELPERS
+   ========================================================================= */
+const SUPABASE_URL = 'https://ygfksgfwysxjhseasder.supabase.co';
+const SUPABASE_ANON_KEY = 'PASTE_YOUR_SUPABASE_ANON_KEY_HERE'; // TODO: แทนที่ด้วย anon/public key จาก Supabase Dashboard > Settings > API
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const TOKEN_KEY = 'fms_session_token';
+function saveToken(t){ localStorage.setItem(TOKEN_KEY, t); }
+function getToken(){ return localStorage.getItem(TOKEN_KEY); }
+function clearToken(){ localStorage.removeItem(TOKEN_KEY); }
+
+function parseRpcError(msg){
+  const raw = String(msg||'');
+  const m = raw.match(/^[A-Z_]+:\s*(.+)$/s);
+  return m ? m[1] : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
+}
+async function callRpc(name, params){
+  const { data, error } = await sb.rpc(name, params);
+  if(error){
+    if(String(error.message||'').includes('SESSION_INVALID')) logout();
+    throw new Error(parseRpcError(error.message));
+  }
+  return data;
+}
+
+/* =========================================================================
+   DATA MODEL (ข้อมูลจะถูกโหลดจาก Supabase หลัง login เท่านั้น ไม่มีข้อมูลจำลอง)
+   ========================================================================= */
+const DB = { users: [], students: {} };
+const DEFAULT_PASSWORD = '1234';
+function usernameFromEmail(email){ return String(email).split('@')[0]; }
+function totalBalance(sid){
+  const s = DB.students[sid];
+  if(!s) return 0;
+  if(s.balance !== undefined) return s.balance;
+  return s.accounts.reduce((sum,a)=>sum+a.balance,0);
+}
+
+let ME = null;
+function applyAppState(data){
+  ME = data.profile;
+  if(ME.role === 'student'){
+    DB.users = [ME];
+    DB.students = {};
+    DB.students[ME.id] = {
+      accounts: data.accounts,
+      expenseCategories: data.expenseCategories,
+      incomeCategories: data.incomeCategories,
+      transactions: data.transactions,
+    };
+  } else if(ME.role === 'advisor'){
+    DB.users = data.students.map(s=>({id:s.id, role:'student', name:s.name, email:s.email, major:s.major, advisorId:ME.id}));
+    DB.students = {};
+    data.students.forEach(s=>{ DB.students[s.id] = {balance:s.balance, accountCount:s.accountCount, txnCount:s.txnCount}; });
+  } else if(ME.role === 'admin'){
+    DB.users = data.users;
+    DB.students = {};
+    data.users.forEach(u=>{ if(u.role==='student') DB.students[u.id] = {balance:u.balance}; });
+  }
+}
+async function refreshAppState(){
+  const data = await callRpc('get_app_state', {p_token:TOKEN});
+  applyAppState(data);
+}
+
+/* =========================================================================
+   APP STATE
+   ========================================================================= */
+const state = {
+  view: 'login',
+  role: null,
+  currentStudentId: null,
+  advisorId: null,
+  advisorSelectedStudentId: null,
+  advisorView: 'overview',
+  advisorReportMonth: null,
+  tab: 'home',
+  moreSection: 'menu',
+  modal: null,
+  statsMonth: '2026-06',
+  reportMonth: '2026-06',
+  expandedCategoryId: null,
+  txnFilter: 'all',
+  loginUsername: '',
+  loginError: '',
+};
+function setState(patch){ Object.assign(state, patch); render(); }
+
+/* =========================================================================
+   DERIVED HELPERS
+   ========================================================================= */
+function curStudent(){ return DB.students[state.currentStudentId]; }
+function curUser(){ return DB.users.find(u=>u.id===state.currentStudentId); }
+function studentsOf(advisorId){ return DB.users.filter(u=>u.role==='student' && u.advisorId===advisorId); }
+function accountName(s,id){ const a=s.accounts.find(x=>x.id===id); return a? a.name : 'บัญชีที่ถูกลบ'; }
+function catInfo(list,id){ return list.find(c=>c.id===id) || {name:'หมวดที่ถูกลบ', icon:'❓'}; }
+function allMonthsFor(sid){
+  const s = DB.students[sid];
+  const set = new Set(s.transactions.filter(t=>t.type!=='transfer').map(t=>monthKey(t.date)));
+  return [...set].sort().reverse();
+}
+function monthTxns(sid, mkey, type){
+  const s = DB.students[sid];
+  return s.transactions.filter(t => monthKey(t.date)===mkey && (type? t.type===type : true));
+}
+function expenseByCategory(sid, mkey){
+  const s = DB.students[sid];
+  const exp = monthTxns(sid, mkey, 'expense');
+  const map = {};
+  exp.forEach(t=>{
+    map[t.categoryId] = (map[t.categoryId]||0) + Number(t.amount);
+  });
+  return Object.entries(map).map(([catId,total])=>({catId, total, cat: catInfo(s.expenseCategories, catId)}))
+    .sort((a,b)=>b.total-a.total);
+}
+
+/* =========================================================================
+   RENDER: ROOT
+   ========================================================================= */
+function render(){
+  const app = document.getElementById('app');
+  if(state.view==='login'){
+    app.innerHTML = renderLoginPage();
+    document.getElementById('modal-root').innerHTML = '';
+    return;
+  }
+  app.innerHTML = `
+    ${renderTopBar()}
+    <div class="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pb-28 md:pb-10 pt-3">
+      ${state.role==='student' ? renderStudentShell() : ''}
+      ${state.role==='advisor' ? renderAdvisorShell() : ''}
+      ${state.role==='admin' ? renderAdminShell() : ''}
+    </div>
+    ${state.role==='student' ? renderBottomNav() : ''}
+  `;
+  renderModal();
+  requestAnimationFrame(()=>{ initCharts(); });
+}
+
+/* ---------- Login page ---------- */
+function renderLoginPage(){
+  return `
+  <div class="min-h-screen flex items-center justify-center px-4 py-10 sm:py-16">
+    <div class="w-full max-w-md">
+      <div class="glass rounded-[28px] p-7 sm:p-9 flex flex-col justify-center animate-in">
+        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-400 flex items-center justify-center text-white text-2xl shadow-lg shadow-pink-300/50 mb-4">💗</div>
+        <p class="text-xl font-bold text-slate-800 mb-1">เข้าสู่ระบบ</p>
+        <p class="text-sm text-slate-500 mb-6">ระบบจัดการการเงินนักศึกษา โครงการครูคืนถิ่น</p>
+        ${state.loginError ? `<div class="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">${esc(state.loginError)}</div>` : ''}
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-slate-500 font-medium">ชื่อผู้ใช้งาน (Username)</label>
+            <input id="login-username" type="text" placeholder="ชื่อผู้ใช้งาน" value="${esc(state.loginUsername)}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 font-medium">รหัสผ่าน</label>
+            <input id="login-password" type="password" placeholder="รหัสผ่าน" onkeydown="if(event.key==='Enter') submitLogin()" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+          </div>
+        </div>
+        <button onclick="submitLogin()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-5">เข้าสู่ระบบ</button>
+        <p class="text-[11px] text-slate-400 mt-4 text-center leading-relaxed">พัฒนาโดย อาจารย์มะรอกี แมเดะา<br>สาขาคณิตศาสตร์ คณะวิทยาศาสตร์เทคโนโลยีและการเกษตร</p>
+      </div>
+    </div>
+  </div>`;
+}
+let TOKEN = null;
+async function submitLogin(){
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  state.loginUsername = username;
+  if(!username || !password){ setState({loginError:'กรุณากรอกชื่อผู้ใช้งานและรหัสผ่าน'}); return; }
+  try{
+    const data = await callRpc('login', {p_username:username, p_password:password});
+    TOKEN = data.token;
+    saveToken(TOKEN);
+    await enterAppAsLoggedIn();
+  }catch(e){
+    setState({loginError: e.message});
+  }
+}
+async function enterAppAsLoggedIn(){
+  const data = await callRpc('get_app_state', {p_token:TOKEN});
+  applyAppState(data);
+  state.role = ME.role;
+  if(ME.role==='student') state.currentStudentId = ME.id;
+  if(ME.role==='advisor') state.advisorId = ME.id;
+  state.view = 'app';
+  state.modal = null;
+  state.tab = 'home';
+  state.moreSection = 'menu';
+  state.advisorSelectedStudentId = null;
+  state.advisorView = 'overview';
+  state.loginUsername = '';
+  state.loginError = '';
+  render();
+}
+async function logout(){
+  const t = TOKEN;
+  TOKEN = null;
+  clearToken();
+  state.view = 'login';
+  state.role = null;
+  state.currentStudentId = null;
+  state.advisorId = null;
+  state.advisorSelectedStudentId = null;
+  state.modal = null;
+  state.loginUsername = '';
+  state.loginError = '';
+  DB.users = []; DB.students = {}; ME = null;
+  render();
+  if(t){ try{ await sb.rpc('logout', {p_token:t}); }catch(e){} }
+}
+function currentLoggedInUser(){ return ME; }
+
+/* ---------- Top bar (signed-in identity) ---------- */
+function renderTopBar(){
+  const roleMeta = {
+    admin:   {label:'ผู้ดูแลระบบ', grad:'from-slate-500 to-slate-700'},
+    advisor: {label:'อาจารย์ที่ปรึกษา', grad:'from-indigo-400 to-indigo-600'},
+    student: {label:'นักศึกษา', grad:'from-pink-400 to-rose-500'},
+  }[state.role];
+  const user = currentLoggedInUser();
+
+  return `
+  <div class="sticky top-0 z-30 no-print">
+    <div class="glass-solid border-b border-white/40 px-3 sm:px-4 md:px-6 py-2.5">
+      <div class="max-w-6xl mx-auto flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-400 flex items-center justify-center text-white text-lg shadow-md shadow-pink-300/50 shrink-0">💗</div>
+          <div class="min-w-0 hidden sm:block">
+            <p class="font-semibold text-sm leading-tight text-slate-700 truncate">ระบบจัดการการเงินนักศึกษา</p>
+            <p class="text-[11px] text-pink-500 leading-tight -mt-0.5">โครงการครูคืนถิ่น</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="openModal({type:'myAccount'})" class="tap glass rounded-full pl-1 pr-3 py-1 flex items-center gap-2 hover:bg-white/60">
+            <span class="w-7 h-7 rounded-full bg-gradient-to-br ${roleMeta.grad} flex items-center justify-center text-white text-xs font-bold shrink-0">${esc((user&&user.name[0])||'?')}</span>
+            <span class="text-left leading-tight block max-w-[90px] sm:max-w-[140px]">
+              <span class="block text-xs font-semibold text-slate-700 truncate">${esc(user?user.name:'')}</span>
+              <span class="block text-[10px] text-pink-500">${roleMeta.label}</span>
+            </span>
+          </button>
+          <button onclick="logout()" title="ออกจากระบบ" class="tap glass-btn w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-rose-500 shrink-0">${icon('logout','w-4 h-4')}</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   STUDENT SHELL (mobile bottom-nav / desktop top-nav, 2-col layout)
+   ========================================================================= */
+function renderStudentShell(){
+  return `
+  <div class="animate-fade">
+    <!-- Desktop top tabs -->
+    <div class="hidden md:flex items-center justify-between mb-5 mt-1">
+      <div class="glass rounded-2xl p-1.5 flex items-center gap-1">
+        ${deskTab('home','หน้าหลัก','home')}
+        ${deskTab('transactions','สรุปรายการ','list')}
+        ${deskTab('stats','สถิติรายจ่าย','pie')}
+        ${deskTab('report','รายงานสรุป','report')}
+        ${deskTab('more','จัดการ/เพิ่มเติม','more')}
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="openModal({type:'transfer'})" class="tap glass-btn rounded-xl px-3 py-2 flex items-center gap-1.5 text-sm font-medium text-slate-700">${icon('transfer','w-4 h-4')} โอนเงิน</button>
+        <button onclick="openModal({type:'addTxn', txnType:'income'})" class="tap rounded-xl px-3 py-2 flex items-center gap-1.5 text-sm font-medium text-white bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-md shadow-emerald-200">${icon('income','w-4 h-4')} รายรับ</button>
+        <button onclick="openModal({type:'addTxn', txnType:'expense'})" class="tap rounded-xl px-3 py-2 flex items-center gap-1.5 text-sm font-medium text-white bg-gradient-to-r from-pink-500 to-rose-500 shadow-md shadow-pink-200">${icon('expense','w-4 h-4')} รายจ่าย</button>
+      </div>
+    </div>
+
+    ${state.tab==='home' ? renderHomeTab() : ''}
+    ${state.tab==='transactions' ? renderTransactionsTab() : ''}
+    ${state.tab==='stats' ? renderStatsTab() : ''}
+    ${state.tab==='report' ? renderReportTab() : ''}
+    ${state.tab==='more' ? renderMoreTab() : ''}
+  </div>`;
+}
+function deskTab(tab,label,ic){
+  return `<button onclick="setState({tab:'${tab}'})" class="tap flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition
+    ${state.tab===tab?'bg-white/70 text-pink-600 shadow-sm':'text-slate-600 hover:bg-white/40'}">${icon(ic,'w-4 h-4')} ${label}</button>`;
+}
+
+/* ---------- Bottom Nav (mobile) ---------- */
+function renderBottomNav(){
+  const item = (tab, ic, label, onClick) => `
+    <button onclick="${onClick}" class="tap flex flex-col items-center justify-center gap-0.5 flex-1 py-2 ${state.tab===tab && !onClick.includes('openModal') ? 'text-pink-600':'text-slate-500'}">
+      ${icon(ic,'w-5 h-5')}<span class="text-[10px] font-medium">${label}</span>
+    </button>`;
+  return `
+  <div class="fixed bottom-0 left-0 right-0 z-30 md:hidden no-print pb-[env(safe-area-inset-bottom)]">
+    <div class="glass-solid border-t border-white/50 mx-2 mb-2 rounded-3xl shadow-2xl shadow-pink-200/40 flex items-end px-1 pt-1">
+      ${item('transfer','transfer','โอนเงิน', "openModal({type:'transfer'})")}
+      ${item('income','income','รายรับ', "openModal({type:'addTxn', txnType:'income'})")}
+      <div class="flex-1 flex flex-col items-center -mt-6">
+        <button onclick="setState({tab:'home'})" class="tap w-14 h-14 rounded-full bg-gradient-to-br from-pink-500 to-rose-500 shadow-lg shadow-pink-400/50 flex items-center justify-center text-white border-4 border-white/70">
+          ${icon('home','w-6 h-6')}
+        </button>
+        <span class="text-[10px] font-medium mt-0.5 ${state.tab==='home'?'text-pink-600':'text-slate-500'}">หน้าหลัก</span>
+      </div>
+      ${item('expense','expense','รายจ่าย', "openModal({type:'addTxn', txnType:'expense'})")}
+      ${item('more','more','เมนู', "setState({tab:'more'})")}
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   HOME TAB
+   ========================================================================= */
+function renderHomeTab(){
+  const s = curStudent(); const u = curUser();
+  const total = totalBalance(state.currentStudentId);
+  const segs = s.accounts.map((a,i)=>({a, pct: total>0 ? Math.max(0,a.balance)/total*100 : (100/s.accounts.length)}));
+
+  const summaryCard = `
+  <div class="glass rounded-[28px] p-5 sm:p-6 animate-in">
+    <div class="flex items-center justify-between mb-1">
+      <p class="text-sm text-slate-500">สวัสดี, <span class="font-semibold text-slate-700">${esc(u.name)}</span></p>
+      <span class="text-[11px] px-2 py-1 rounded-full bg-pink-100 text-pink-600 font-medium">${esc(u.major||'')}</span>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">ยอดเงินคงเหลือรวมทุกบัญชี</p>
+    <p class="text-4xl sm:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">฿${fmtMoney(total)}</p>
+
+    <div class="mb-1 flex rounded-full overflow-hidden h-3 w-full bg-white/50 border border-white/60">
+      ${segs.map(({a,pct})=>`<div class="segbar-seg h-full" style="width:${pct}%; background:${ACCOUNT_TYPES[a.type].hex}" title="${esc(a.name)}"></div>`).join('')}
+    </div>
+    <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 mb-4">
+      ${s.accounts.map(a=>`<div class="flex items-center gap-1 text-[11px] text-slate-500"><span class="w-2 h-2 rounded-full inline-block" style="background:${ACCOUNT_TYPES[a.type].hex}"></span>${esc(a.name)}</div>`).join('')}
+    </div>
+
+    <div class="flex gap-2 overflow-x-auto no-scrollbar chip-scroll pb-1">
+      ${s.accounts.map(a=>`
+        <button onclick="openModal({type:'accountDetail', accountId:'${a.id}'})" class="tap shrink-0 glass-btn rounded-2xl px-3.5 py-2.5 flex items-center gap-2 min-w-[150px]">
+          <span class="w-9 h-9 rounded-xl bg-gradient-to-br ${ACCOUNT_TYPES[a.type].grad} flex items-center justify-center text-base shadow">${ACCOUNT_TYPES[a.type].icon}</span>
+          <span class="text-left">
+            <span class="block text-[11px] text-slate-500 truncate max-w-[90px]">${esc(a.name)}</span>
+            <span class="block text-sm font-bold text-slate-700">฿${fmtMoney(a.balance)}</span>
+          </span>
+        </button>`).join('')}
+      ${s.accounts.length < MAX_ACCOUNTS ? `
+        <button onclick="openModal({type:'addAccount'})" class="tap shrink-0 border-2 border-dashed border-pink-300/70 rounded-2xl px-4 py-2.5 flex items-center gap-1.5 text-pink-500 text-sm font-medium min-w-[110px] justify-center">
+          ${icon('plus','w-4 h-4')} เพิ่มบัญชี
+        </button>` : ''}
+    </div>
+  </div>`;
+
+  const quickActions = `
+  <div class="grid grid-cols-4 md:grid-cols-2 gap-2.5 sm:gap-3 mt-4">
+    ${quickBtn('list','สรุปรายการ',"setState({tab:'transactions'})")}
+    ${quickBtn('pie','สถิติรายจ่าย',"setState({tab:'stats'})")}
+    ${quickBtn('report','วิเคราะห์รายจ่าย',"setState({tab:'report'})")}
+    ${quickBtn('more','เพิ่มเติม',"setState({tab:'more'})")}
+  </div>`;
+
+  const recent = [...s.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0,8);
+  const recentList = `
+  <div class="glass rounded-[24px] p-4 sm:p-5 mt-4 animate-in">
+    <div class="flex items-center justify-between mb-2">
+      <p class="font-semibold text-slate-700">ประวัติธุรกรรมล่าสุด</p>
+      <button onclick="setState({tab:'transactions'})" class="text-xs text-pink-500 font-medium">ดูทั้งหมด</button>
+    </div>
+    <div class="divide-y divide-white/50 max-h-[420px] overflow-y-auto no-scrollbar">
+      ${recent.map(t=>txnRow(s,t)).join('') || emptyRow()}
+    </div>
+  </div>`;
+
+  return `
+  <div class="md:grid md:grid-cols-5 md:gap-5">
+    <div class="md:col-span-2">${summaryCard}</div>
+    <div class="md:col-span-3">${quickActions}${recentList}</div>
+  </div>`;
+}
+function quickBtn(ic,label,onClick){
+  return `<button onclick="${onClick}" class="tap glass rounded-2xl py-4 md:py-5 flex flex-col items-center justify-center gap-1.5 text-slate-600 hover:text-pink-600">
+    <span class="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center">${icon(ic,'w-5 h-5')}</span>
+    <span class="text-[11px] sm:text-xs font-medium text-center leading-tight">${label}</span>
+  </button>`;
+}
+function emptyRow(){ return `<p class="text-sm text-slate-400 py-6 text-center">ยังไม่มีรายการ</p>`; }
+function txnRow(s,t){
+  let icn, label, amtStr, amtColor, sub;
+  if(t.type==='income'){ const c=catInfo(s.incomeCategories,t.categoryId); icn=c.icon; label=c.name; amtStr='+฿'+fmtMoney(t.amount); amtColor='text-emerald-600'; sub=accountName(s,t.accountId); }
+  else if(t.type==='expense'){ const c=catInfo(s.expenseCategories,t.categoryId); icn=c.icon; label=c.name; amtStr='-฿'+fmtMoney(t.amount); amtColor='text-rose-600'; sub=accountName(s,t.accountId); }
+  else { icn='🔁'; label='โอนเงิน'; amtStr='฿'+fmtMoney(t.amount); amtColor='text-slate-500'; sub=`${accountName(s,t.fromAccountId)} → ${accountName(s,t.toAccountId)}`; }
+  return `
+  <button onclick="openModal({type:'txnDetail', txnId:'${t.id}'})" class="tap w-full flex items-center gap-3 py-2.5 text-left hover:bg-white/40 rounded-xl px-1.5">
+    <span class="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center text-lg shrink-0">${icn}</span>
+    <span class="min-w-0 flex-1">
+      <span class="block text-sm font-medium text-slate-700 truncate">${esc(label)}</span>
+      <span class="block text-[11px] text-slate-400 truncate">${fmtDateShort(t.date)} · ${esc(sub)}${t.note?' · '+esc(t.note):''}</span>
+    </span>
+    <span class="text-sm font-bold ${amtColor} shrink-0">${amtStr}</span>
+  </button>`;
+}
+
+/* =========================================================================
+   TRANSACTIONS TAB (สรุปรายการ)
+   ========================================================================= */
+function renderTransactionsTab(){
+  const s = curStudent();
+  let list = [...s.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  if(state.txnFilter!=='all') list = list.filter(t=>t.type===state.txnFilter);
+  const filterBtn = (v,label) => `<button onclick="setState({txnFilter:'${v}'})" class="tap px-3 py-1.5 rounded-full text-xs font-medium ${state.txnFilter===v?'bg-pink-500 text-white':'glass-btn text-slate-600'}">${label}</button>`;
+  return `
+  <div class="glass rounded-[24px] p-4 sm:p-5 animate-in">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <p class="font-semibold text-slate-700 text-lg">สรุปรายการทั้งหมด</p>
+      <div class="flex gap-1.5">${filterBtn('all','ทั้งหมด')}${filterBtn('income','รายรับ')}${filterBtn('expense','รายจ่าย')}${filterBtn('transfer','โอนเงิน')}</div>
+    </div>
+    <div class="divide-y divide-white/50 max-h-[70vh] overflow-y-auto no-scrollbar">
+      ${list.map(t=>txnRow(s,t)).join('') || emptyRow()}
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   STATS TAB (สถิติรายจ่าย - donut + daily avg table + accordion)
+   ========================================================================= */
+function renderStatsTab(){
+  const sid = state.currentStudentId; const s = curStudent();
+  const months = allMonthsFor(sid);
+  if(!months.includes(state.statsMonth)) state.statsMonth = months[0] || TODAY.slice(0,7);
+  const data = expenseByCategory(sid, state.statsMonth);
+  const total = data.reduce((sum,d)=>sum+d.total,0);
+  const dim = daysInMonth(state.statsMonth);
+
+  const monthOpts = months.map(m=>`<option value="${m}" ${m===state.statsMonth?'selected':''}>${monthLabel(m)}</option>`).join('');
+
+  const rows = data.map((d,i)=>{
+    const color = CAT_COLORS[i%CAT_COLORS.length];
+    const avg = d.total/dim;
+    const pct = total>0 ? (d.total/total*100) : 0;
+    const isOpen = state.expandedCategoryId === d.catId;
+    const details = monthTxns(sid, state.statsMonth,'expense').filter(t=>t.categoryId===d.catId).sort((a,b)=>a.date.localeCompare(b.date));
+    return `
+    <div class="border-b border-white/50 last:border-0">
+      <button onclick="toggleCategory('${d.catId}')" class="w-full flex items-center gap-3 py-2.5 text-left">
+        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></span>
+        <span class="text-lg">${d.cat.icon}</span>
+        <span class="flex-1 min-w-0">
+          <span class="block text-sm font-medium text-slate-700 truncate">${esc(d.cat.name)}</span>
+          <span class="block text-[11px] text-slate-400">เฉลี่ย/วัน ฿${fmtMoney(avg)} · ${pct.toFixed(1)}%</span>
+        </span>
+        <span class="text-sm font-bold text-slate-700">฿${fmtMoney(d.total)}</span>
+        <span class="text-slate-400 transition-transform ${isOpen?'rotate-180':''}">${icon('chevDown','w-4 h-4')}</span>
+      </button>
+      ${isOpen ? `
+      <div class="pl-8 pb-3 animate-slide space-y-1.5">
+        ${details.map(t=>`
+          <button onclick="openModal({type:'txnDetail', txnId:'${t.id}'})" class="w-full flex items-center justify-between text-xs bg-white/50 rounded-lg px-2.5 py-2 hover:bg-white/80">
+            <span class="text-slate-500">${fmtDateShort(t.date)} ${t.note?'· '+esc(t.note):''}</span>
+            <span class="font-semibold text-rose-600">-฿${fmtMoney(t.amount)}</span>
+          </button>`).join('') || '<p class="text-xs text-slate-400">ไม่มีรายการ</p>'}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="md:grid md:grid-cols-5 md:gap-5">
+    <div class="md:col-span-2 glass rounded-[24px] p-4 sm:p-5 animate-in">
+      <div class="flex items-center justify-between mb-3">
+        <p class="font-semibold text-slate-700">สถิติรายจ่ายตามหมวดหมู่</p>
+        <select onchange="setState({statsMonth:this.value, expandedCategoryId:null})" class="glass-btn text-xs rounded-lg px-2 py-1.5">${monthOpts}</select>
+      </div>
+      ${total>0 ? `<div class="relative h-56 sm:h-64"><canvas id="donutChart"></canvas>
+        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span class="text-[11px] text-slate-400">รวมรายจ่าย</span>
+          <span class="text-lg font-bold text-slate-700">฿${fmtMoney(total)}</span>
+        </div></div>` : `<p class="text-sm text-slate-400 text-center py-16">ไม่มีข้อมูลรายจ่ายเดือนนี้</p>`}
+    </div>
+    <div class="md:col-span-3 glass rounded-[24px] p-4 sm:p-5 mt-4 md:mt-0 animate-in">
+      <p class="font-semibold text-slate-700 mb-1">ตารางค่าเฉลี่ยรายวันต่อหมวดหมู่</p>
+      <p class="text-[11px] text-slate-400 mb-2">คลิกแต่ละหมวดเพื่อดูรายละเอียดรายการ · ${monthLabel(state.statsMonth)} (${dim} วัน)</p>
+      <div class="max-h-[480px] overflow-y-auto no-scrollbar">${rows || emptyRow()}</div>
+    </div>
+  </div>`;
+}
+let donutChartInstance=null;
+function initCharts(){
+  const canvas = document.getElementById('donutChart');
+  if(canvas){
+    const data = expenseByCategory(state.currentStudentId, state.statsMonth);
+    if(donutChartInstance){ donutChartInstance.destroy(); donutChartInstance=null; }
+    donutChartInstance = new Chart(canvas, {
+      type:'doughnut',
+      data:{ labels: data.map(d=>d.cat.name), datasets:[{ data:data.map(d=>d.total), backgroundColor: data.map((_,i)=>CAT_COLORS[i%CAT_COLORS.length]), borderColor:'rgba(255,255,255,.8)', borderWidth:3 }] },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'68%', plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, boxHeight:10, font:{size:10, family:'Prompt'}, color:'#64748b' } },
+        tooltip:{ callbacks:{ label:(ctx)=> ` ${ctx.label}: ฿${Number(ctx.parsed).toLocaleString('th-TH',{minimumFractionDigits:2})}` } } } }
+    });
+  }
+  const acanvas = document.getElementById('advisorDonutChart');
+  if(acanvas){
+    const sid = state.advisorSelectedStudentId;
+    const months = allMonthsFor(sid);
+    const mkey = months[0];
+    const data = mkey ? expenseByCategory(sid, mkey) : [];
+    if(window._advChart){ window._advChart.destroy(); }
+    window._advChart = new Chart(acanvas,{ type:'doughnut',
+      data:{ labels:data.map(d=>d.cat.name), datasets:[{data:data.map(d=>d.total), backgroundColor:data.map((_,i)=>CAT_COLORS[i%CAT_COLORS.length]), borderColor:'rgba(255,255,255,.8)', borderWidth:3}]},
+      options:{responsive:true, maintainAspectRatio:false, cutout:'65%', plugins:{legend:{position:'bottom', labels:{boxWidth:10,boxHeight:10,font:{size:10,family:'Prompt'},color:'#64748b'}}}}
+    });
+  }
+}
+
+/* =========================================================================
+   REPORT TAB (รายงานสรุปประจำเดือน + PDF print)
+   ========================================================================= */
+function renderReportTab(){
+  const sid = state.currentStudentId; const s = curStudent(); const u = curUser();
+  const months = allMonthsFor(sid);
+  if(!months.includes(state.reportMonth)) state.reportMonth = months[0] || TODAY.slice(0,7);
+  const mkey = state.reportMonth;
+  const incomes = monthTxns(sid, mkey,'income').sort((a,b)=>a.date.localeCompare(b.date));
+  const expenses = monthTxns(sid, mkey,'expense').sort((a,b)=>a.date.localeCompare(b.date));
+  const totalIn = incomes.reduce((a,t)=>a+Number(t.amount),0);
+  const totalEx = expenses.reduce((a,t)=>a+Number(t.amount),0);
+  const net = totalIn-totalEx;
+  const monthOpts = months.map(m=>`<option value="${m}" ${m===mkey?'selected':''}>${monthLabel(m)}</option>`).join('');
+
+  const incRows = incomes.map(t=>`<tr class="border-b border-white/40"><td class="py-1.5 pr-2 text-xs text-slate-500">${fmtDateShort(t.date)}</td><td class="py-1.5 pr-2 text-sm text-slate-700">${catInfo(s.incomeCategories,t.categoryId).icon} ${esc(catInfo(s.incomeCategories,t.categoryId).name)}</td><td class="py-1.5 text-sm font-semibold text-emerald-600 text-right">฿${fmtMoney(t.amount)}</td></tr>`).join('');
+  const expRows = expenses.map(t=>`<tr class="border-b border-white/40"><td class="py-1.5 pr-2 text-xs text-slate-500">${fmtDateShort(t.date)}</td><td class="py-1.5 pr-2 text-sm text-slate-700">${catInfo(s.expenseCategories,t.categoryId).icon} ${esc(catInfo(s.expenseCategories,t.categoryId).name)}</td><td class="py-1.5 text-sm font-semibold text-rose-600 text-right">฿${fmtMoney(t.amount)}</td></tr>`).join('');
+
+  const printHtml = buildPrintReport(u.name, mkey, incomes, expenses, s, totalIn, totalEx, net);
+  document.getElementById('print-area').innerHTML = printHtml;
+
+  return `
+  <div class="glass rounded-[24px] p-4 sm:p-5 animate-in">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <p class="font-semibold text-slate-700 text-lg">รายงานสรุปประจำเดือน</p>
+      <div class="flex items-center gap-2">
+        <select onchange="setState({reportMonth:this.value})" class="glass-btn text-xs rounded-lg px-2 py-1.5">${monthOpts}</select>
+        <button onclick="window.print()" class="tap flex items-center gap-1.5 bg-gradient-to-r from-slate-600 to-slate-700 text-white text-xs font-medium px-3 py-2 rounded-lg shadow">${icon('printer','w-4 h-4')} พิมพ์รายงาน (PDF)</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      <div class="glass-btn rounded-xl p-3 text-center"><p class="text-[11px] text-slate-500">รายรับรวม</p><p class="text-base sm:text-lg font-bold text-emerald-600">฿${fmtMoney(totalIn)}</p></div>
+      <div class="glass-btn rounded-xl p-3 text-center"><p class="text-[11px] text-slate-500">รายจ่ายรวม</p><p class="text-base sm:text-lg font-bold text-rose-600">฿${fmtMoney(totalEx)}</p></div>
+      <div class="glass-btn rounded-xl p-3 text-center"><p class="text-[11px] text-slate-500">คงเหลือสุทธิ</p><p class="text-base sm:text-lg font-bold ${net>=0?'text-slate-700':'text-rose-600'}">฿${fmtMoney(net)}</p></div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="bg-white/40 rounded-2xl p-3.5">
+        <p class="text-sm font-semibold text-emerald-600 mb-2 flex items-center gap-1.5">${icon('income','w-4 h-4')} รายรับ (${incomes.length} รายการ)</p>
+        <table class="w-full"><tbody>${incRows || '<tr><td class="text-xs text-slate-400 py-4">ไม่มีรายการ</td></tr>'}</tbody></table>
+      </div>
+      <div class="bg-white/40 rounded-2xl p-3.5">
+        <p class="text-sm font-semibold text-rose-600 mb-2 flex items-center gap-1.5">${icon('expense','w-4 h-4')} รายจ่าย (${expenses.length} รายการ)</p>
+        <table class="w-full"><tbody>${expRows || '<tr><td class="text-xs text-slate-400 py-4">ไม่มีรายการ</td></tr>'}</tbody></table>
+      </div>
+    </div>
+  </div>`;
+}
+function buildPrintReport(name, mkey, incomes, expenses, s, totalIn, totalEx, net){
+  const incRows = incomes.map(t=>`<tr><td>${fmtDateShort(t.date)}</td><td>${esc(catInfo(s.incomeCategories,t.categoryId).name)}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>`).join('');
+  const expRows = expenses.map(t=>`<tr><td>${fmtDateShort(t.date)}</td><td>${esc(catInfo(s.expenseCategories,t.categoryId).name)}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>`).join('');
+  return `
+  <div style="font-family:'Prompt',sans-serif; color:#333; max-width:800px; margin:0 auto;">
+    <h2 style="margin-bottom:2px;">รายงานสรุปการเงินประจำเดือน ${monthLabel(mkey)}</h2>
+    <p style="margin-top:0;color:#666;">โครงการครูคืนถิ่น — นักศึกษา: ${esc(name)}</p>
+    <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+      <tr><td style="padding:4px 0;">รายรับรวม</td><td style="text-align:right; color:#059669; font-weight:bold;">฿${fmtMoney(totalIn)}</td></tr>
+      <tr><td style="padding:4px 0;">รายจ่ายรวม</td><td style="text-align:right; color:#e11d48; font-weight:bold;">฿${fmtMoney(totalEx)}</td></tr>
+      <tr><td style="padding:4px 0; border-top:1px solid #ccc;">คงเหลือสุทธิ</td><td style="text-align:right; border-top:1px solid #ccc; font-weight:bold;">฿${fmtMoney(net)}</td></tr>
+    </table>
+    <div style="display:flex; gap:24px; margin-top:16px;">
+      <div style="flex:1;">
+        <h4 style="color:#059669; border-bottom:2px solid #059669; padding-bottom:4px;">รายรับ</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">${incRows}</table>
+      </div>
+      <div style="flex:1;">
+        <h4 style="color:#e11d48; border-bottom:2px solid #e11d48; padding-bottom:4px;">รายจ่าย</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">${expRows}</table>
+      </div>
+    </div>
+    <p style="margin-top:24px; font-size:11px; color:#999;">พิมพ์เมื่อ ${fmtDateFull(TODAY)}</p>
+  </div>`;
+}
+
+/* =========================================================================
+   MORE TAB (จัดการบัญชี / หมวดหมู่)
+   ========================================================================= */
+function renderMoreTab(){
+  const s = curStudent();
+  const sectionBtn = (v,label,ic) => `<button onclick="setState({moreSection:'${v}'})" class="tap flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${state.moreSection===v?'bg-pink-500 text-white':'glass-btn text-slate-600'}">${icon(ic,'w-3.5 h-3.5')} ${label}</button>`;
+  let body='';
+  if(state.moreSection==='menu'){
+    body = `
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
+      ${menuCard('wallet','จัดการบัญชี', s.accounts.length+' / '+MAX_ACCOUNTS, "setState({moreSection:'accounts'})")}
+      ${menuCard('expense','หมวดรายจ่าย', s.expenseCategories.length+' / '+MAX_EXPENSE_CATS, "setState({moreSection:'expcats'})")}
+      ${menuCard('income','หมวดรายรับ', s.incomeCategories.length+' / '+MAX_INCOME_CATS, "setState({moreSection:'inccats'})")}
+      ${menuCard('list','สรุปรายการทั้งหมด','', "setState({tab:'transactions'})")}
+      ${menuCard('pie','สถิติรายจ่าย','', "setState({tab:'stats'})")}
+      ${menuCard('report','รายงานสรุป/พิมพ์ PDF','', "setState({tab:'report'})")}
+    </div>`;
+  } else if(state.moreSection==='accounts'){
+    body = `
+    <div class="mt-3 space-y-2">
+      ${s.accounts.map(a=>`
+        <div class="glass-btn rounded-2xl p-3 flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-gradient-to-br ${ACCOUNT_TYPES[a.type].grad} flex items-center justify-center text-base shadow shrink-0">${ACCOUNT_TYPES[a.type].icon}</span>
+          <span class="flex-1 min-w-0">
+            <span class="block text-sm font-semibold text-slate-700 truncate">${esc(a.name)} ${a.type==='cash'?`<span class="ml-1 text-slate-400 align-middle">${icon('lock','w-3 h-3 inline')}</span>`:''}</span>
+            <span class="block text-[11px] text-slate-400">${ACCOUNT_TYPES[a.type].label} · ฿${fmtMoney(a.balance)}</span>
+          </span>
+          ${a.type!=='cash' ? `<button onclick="deleteAccount('${a.id}')" class="tap text-rose-400 hover:text-rose-600 p-2">${icon('trash','w-4 h-4')}</button>` : ''}
+        </div>`).join('')}
+      ${s.accounts.length<MAX_ACCOUNTS ? `<button onclick="openModal({type:'addAccount'})" class="tap w-full border-2 border-dashed border-pink-300/70 rounded-2xl py-3 flex items-center justify-center gap-1.5 text-pink-500 text-sm font-medium">${icon('plus','w-4 h-4')} เพิ่มบัญชีใหม่</button>` : `<p class="text-center text-xs text-slate-400 py-2">ครบจำนวนบัญชีสูงสุดแล้ว (${MAX_ACCOUNTS} บัญชี)</p>`}
+    </div>`;
+  } else if(state.moreSection==='expcats' || state.moreSection==='inccats'){
+    const isExp = state.moreSection==='expcats';
+    const list = isExp ? s.expenseCategories : s.incomeCategories;
+    const max = isExp ? MAX_EXPENSE_CATS : MAX_INCOME_CATS;
+    body = `
+    <div class="mt-3 space-y-2">
+      ${list.map(c=>`
+        <div class="glass-btn rounded-2xl p-3 flex items-center gap-3">
+          <span class="w-9 h-9 rounded-xl bg-white/70 flex items-center justify-center text-base shrink-0">${c.icon}</span>
+          <span class="flex-1 text-sm font-medium text-slate-700">${esc(c.name)}</span>
+          ${c.locked ? `<span class="text-slate-300">${icon('lock','w-4 h-4')}</span>` : `<button onclick="deleteCategory('${isExp?'expense':'income'}','${c.id}')" class="tap text-rose-400 hover:text-rose-600 p-2">${icon('trash','w-4 h-4')}</button>`}
+        </div>`).join('')}
+      ${list.length<max ? `<button onclick="openModal({type:'addCategory', kind:'${isExp?'expense':'income'}'})" class="tap w-full border-2 border-dashed border-pink-300/70 rounded-2xl py-3 flex items-center justify-center gap-1.5 text-pink-500 text-sm font-medium">${icon('plus','w-4 h-4')} เพิ่มหมวดหมู่ใหม่</button>` : `<p class="text-center text-xs text-slate-400 py-2">ครบจำนวนหมวดหมู่สูงสุดแล้ว (${max} หมวด)</p>`}
+    </div>`;
+  }
+  return `
+  <div class="glass rounded-[24px] p-4 sm:p-5 animate-in">
+    <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+      <p class="font-semibold text-slate-700 text-lg">จัดการ / เพิ่มเติม</p>
+      ${state.moreSection!=='menu' ? `<button onclick="setState({moreSection:'menu'})" class="tap flex items-center gap-1 text-xs text-slate-500">${icon('back','w-3.5 h-3.5')} กลับเมนู</button>` : ''}
+    </div>
+    <div class="flex gap-1.5 flex-wrap mt-2">${sectionBtn('menu','เมนูหลัก','more')}${sectionBtn('accounts','บัญชี','wallet')}${sectionBtn('expcats','หมวดรายจ่าย','expense')}${sectionBtn('inccats','หมวดรายรับ','income')}</div>
+    ${body}
+  </div>`;
+}
+function menuCard(ic,label,badge,onClick){
+  return `<button onclick="${onClick}" class="tap glass-btn rounded-2xl p-4 flex flex-col items-start gap-2 text-left">
+    <span class="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center text-pink-500">${icon(ic,'w-5 h-5')}</span>
+    <span class="text-sm font-semibold text-slate-700">${label}</span>
+    ${badge?`<span class="text-[11px] text-slate-400">${badge}</span>`:''}
+  </button>`;
+}
+
+/* =========================================================================
+   MODALS
+   ========================================================================= */
+function openModal(m){ state.modal = m; render(); }
+function closeModal(){ state.modal = null; render(); }
+
+function renderModal(){
+  const root = document.getElementById('modal-root');
+  if(!state.modal){ root.innerHTML=''; return; }
+  const m = state.modal;
+  let content = '';
+  if(m.type==='addTxn') content = modalAddTxn(m.txnType);
+  else if(m.type==='editTxn') content = modalAddTxn(m.txnObj.type, m.txnObj);
+  else if(m.type==='transfer') content = modalTransfer();
+  else if(m.type==='txnDetail') content = modalTxnDetail(m.txnId);
+  else if(m.type==='accountDetail') content = modalAccountDetail(m.accountId);
+  else if(m.type==='addAccount') content = modalAddAccount();
+  else if(m.type==='addCategory') content = modalAddCategory(m.kind);
+  else if(m.type==='userForm') content = modalUserForm(m.mode, m.userId);
+  else if(m.type==='myAccount') content = modalMyAccount();
+
+  root.innerHTML = `
+  <div class="fixed inset-0 modal-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade" onclick="if(event.target===this) closeModal()">
+    <div class="glass-solid w-full sm:max-w-md sm:rounded-[28px] rounded-t-[28px] max-h-[92vh] overflow-y-auto no-scrollbar animate-pop shadow-2xl">
+      ${content}
+    </div>
+  </div>`;
+}
+function modalHeader(title){
+  return `<div class="flex items-center justify-between px-5 pt-5 pb-2 sticky top-0 bg-white/0">
+    <p class="text-lg font-bold text-slate-800">${title}</p>
+    <button onclick="closeModal()" class="tap w-8 h-8 rounded-full bg-white/60 flex items-center justify-center text-slate-500">${icon('close','w-4 h-4')}</button>
+  </div>`;
+}
+
+/* ---- Add/Edit income or expense ---- */
+function modalAddTxn(type, editTxn){
+  const s = curStudent();
+  const cats = type==='income' ? s.incomeCategories : s.expenseCategories;
+  const isEdit = !!editTxn;
+  const title = (isEdit?'แก้ไข':'เพิ่ม') + (type==='income'?'รายรับ':'รายจ่าย');
+  const accentGrad = type==='income' ? 'from-emerald-500 to-emerald-400' : 'from-pink-500 to-rose-500';
+  return `
+  ${modalHeader(title)}
+  <div class="px-5 pb-6 space-y-3.5">
+    <div>
+      <label class="text-xs text-slate-500 font-medium">วันที่</label>
+      <input id="f-date" type="date" value="${editTxn?editTxn.date:TODAY}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">หมวดหมู่</label>
+      <select id="f-cat" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+        ${cats.map(c=>`<option value="${c.id}" ${editTxn&&editTxn.categoryId===c.id?'selected':''}>${c.icon} ${esc(c.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">บัญชี</label>
+      <select id="f-acc" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+        ${s.accounts.map(a=>`<option value="${a.id}" ${editTxn&&editTxn.accountId===a.id?'selected':''}>${ACCOUNT_TYPES[a.type].icon} ${esc(a.name)} (฿${fmtMoney(a.balance)})</option>`).join('')}
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">จำนวนเงิน (บาท)</label>
+      <input id="f-amt" type="number" min="0" step="0.01" value="${editTxn?editTxn.amount:''}" placeholder="0.00" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-lg font-bold text-slate-800">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">โน้ตเพิ่มเติม (ไม่บังคับ)</label>
+      <input id="f-note" type="text" value="${editTxn?esc(editTxn.note||''):''}" placeholder="เช่น ค่าอาหารเที่ยง" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <button onclick="submitTxn('${type}', ${isEdit?`'${editTxn.id}'`:'null'})" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r ${accentGrad} shadow-lg mt-2">
+      ${isEdit?'บันทึกการแก้ไข':'บันทึกรายการ'}
+    </button>
+  </div>`;
+}
+async function submitTxn(type, editId){
+  const date = document.getElementById('f-date').value;
+  const categoryId = document.getElementById('f-cat').value;
+  const accountId = document.getElementById('f-acc').value;
+  const amount = parseFloat(document.getElementById('f-amt').value);
+  const note = document.getElementById('f-note').value.trim();
+  if(!date || !amount || amount<=0){ alert('กรุณากรอกวันที่และจำนวนเงินให้ถูกต้อง'); return; }
+  try{
+    if(editId){
+      await callRpc('edit_transaction', {p_token:TOKEN, p_txn_id:editId, p_date:date, p_category_id:categoryId, p_account_id:accountId, p_amount:amount, p_note:note});
+    } else {
+      await callRpc('add_transaction', {p_token:TOKEN, p_type:type, p_date:date, p_category_id:categoryId, p_account_id:accountId, p_amount:amount, p_note:note});
+    }
+    await refreshAppState();
+    closeModal();
+  }catch(e){ alert(e.message); }
+}
+
+/* ---- Transfer ---- */
+function modalTransfer(){
+  const s = curStudent();
+  return `
+  ${modalHeader('โอนเงินข้ามบัญชี')}
+  <div class="px-5 pb-6 space-y-3.5">
+    <div>
+      <label class="text-xs text-slate-500 font-medium">วันที่</label>
+      <input id="f-date" type="date" value="${TODAY}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">จากบัญชี</label>
+      <select id="f-from" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+        ${s.accounts.map(a=>`<option value="${a.id}">${ACCOUNT_TYPES[a.type].icon} ${esc(a.name)} (฿${fmtMoney(a.balance)})</option>`).join('')}
+      </select>
+    </div>
+    <div class="flex justify-center text-pink-400">${icon('transfer','w-6 h-6')}</div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ไปบัญชี</label>
+      <select id="f-to" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+        ${s.accounts.map(a=>`<option value="${a.id}" ${a===s.accounts[1]?'selected':''}>${ACCOUNT_TYPES[a.type].icon} ${esc(a.name)} (฿${fmtMoney(a.balance)})</option>`).join('')}
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">จำนวนเงิน (บาท)</label>
+      <input id="f-amt" type="number" min="0" step="0.01" placeholder="0.00" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-lg font-bold text-slate-800">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">โน้ตเพิ่มเติม (ไม่บังคับ)</label>
+      <input id="f-note" type="text" placeholder="เช่น ออมเงินเดือนนี้" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <p class="text-[11px] text-slate-400">* รายการโอนจะไม่ถูกนับเป็นรายรับหรือรายจ่ายของระบบ</p>
+    <button onclick="submitTransfer()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-slate-600 to-slate-800 shadow-lg mt-2">ยืนยันการโอนเงิน</button>
+  </div>`;
+}
+async function submitTransfer(){
+  const s = curStudent();
+  const date = document.getElementById('f-date').value;
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  const amount = parseFloat(document.getElementById('f-amt').value);
+  const note = document.getElementById('f-note').value.trim();
+  if(from===to){ alert('กรุณาเลือกบัญชีต้นทางและปลายทางให้ต่างกัน'); return; }
+  if(!amount || amount<=0){ alert('กรุณากรอกจำนวนเงินให้ถูกต้อง'); return; }
+  const fromAcc = s.accounts.find(a=>a.id===from);
+  if(fromAcc.balance < amount){ if(!confirm('ยอดเงินในบัญชีต้นทางไม่พอ ต้องการดำเนินการต่อหรือไม่? (ยอดจะติดลบ)')) return; }
+  try{
+    await callRpc('add_transfer', {p_token:TOKEN, p_date:date, p_from_account_id:from, p_to_account_id:to, p_amount:amount, p_note:note});
+    await refreshAppState();
+    closeModal();
+  }catch(e){ alert(e.message); }
+}
+
+/* ---- Transaction detail / edit / delete ---- */
+function modalTxnDetail(txnId){
+  const s = curStudent();
+  const t = s.transactions.find(x=>x.id===txnId);
+  if(!t) return modalHeader('ไม่พบรายการ');
+  let icn,label,amtStr,amtColor,extra;
+  if(t.type==='income'){ const c=catInfo(s.incomeCategories,t.categoryId); icn=c.icon; label='รายรับ: '+c.name; amtStr='+฿'+fmtMoney(t.amount); amtColor='text-emerald-600'; extra=`<p class="text-sm text-slate-500">บัญชี: ${esc(accountName(s,t.accountId))}</p>`; }
+  else if(t.type==='expense'){ const c=catInfo(s.expenseCategories,t.categoryId); icn=c.icon; label='รายจ่าย: '+c.name; amtStr='-฿'+fmtMoney(t.amount); amtColor='text-rose-600'; extra=`<p class="text-sm text-slate-500">บัญชี: ${esc(accountName(s,t.accountId))}</p>`; }
+  else { icn='🔁'; label='โอนเงินข้ามบัญชี'; amtStr='฿'+fmtMoney(t.amount); amtColor='text-slate-600'; extra=`<p class="text-sm text-slate-500">จาก: ${esc(accountName(s,t.fromAccountId))} → ไป: ${esc(accountName(s,t.toAccountId))}</p>`; }
+  return `
+  ${modalHeader('รายละเอียดธุรกรรม')}
+  <div class="px-5 pb-6">
+    <div class="flex flex-col items-center text-center py-3">
+      <span class="w-16 h-16 rounded-2xl bg-white/70 flex items-center justify-center text-3xl mb-2">${icn}</span>
+      <p class="font-semibold text-slate-700">${esc(label)}</p>
+      <p class="text-2xl font-extrabold ${amtColor} mt-1">${amtStr}</p>
+    </div>
+    <div class="bg-white/40 rounded-2xl p-3.5 space-y-1.5 mt-2">
+      <p class="text-sm text-slate-500">วันที่: ${fmtDateFull(t.date)}</p>
+      ${extra}
+      ${t.note ? `<p class="text-sm text-slate-500">โน้ต: ${esc(t.note)}</p>` : ''}
+    </div>
+    <div class="flex gap-2 mt-4">
+      ${t.type!=='transfer' ? `<button onclick="openModal({type:'editTxn', txnObj: DB.students['${state.currentStudentId}'].transactions.find(x=>x.id==='${t.id}')})" class="tap flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-1.5">${icon('edit','w-4 h-4')} แก้ไข</button>` : ''}
+      <button onclick="deleteTxn('${t.id}')" class="tap flex-1 py-2.5 rounded-xl bg-rose-100 text-rose-600 font-medium flex items-center justify-center gap-1.5">${icon('trash','w-4 h-4')} ลบรายการ</button>
+    </div>
+  </div>`;
+}
+async function deleteTxn(txnId){
+  if(!confirm('ยืนยันการลบรายการนี้? ยอดเงินในบัญชีจะถูกคำนวณใหม่')) return;
+  try{
+    await callRpc('delete_transaction', {p_token:TOKEN, p_txn_id:txnId});
+    await refreshAppState();
+    closeModal();
+  }catch(e){ alert(e.message); }
+}
+
+/* ---- Account detail modal ---- */
+function modalAccountDetail(accountId){
+  const s = curStudent();
+  const a = s.accounts.find(x=>x.id===accountId);
+  if(!a) return modalHeader('ไม่พบบัญชี');
+  const recent = s.transactions.filter(t=> t.accountId===accountId || t.fromAccountId===accountId || t.toAccountId===accountId)
+    .sort((x,y)=>y.date.localeCompare(x.date)).slice(0,6);
+  return `
+  ${modalHeader('รายละเอียดบัญชี')}
+  <div class="px-5 pb-6">
+    <div class="flex flex-col items-center text-center py-2">
+      <span class="w-16 h-16 rounded-2xl bg-gradient-to-br ${ACCOUNT_TYPES[a.type].grad} flex items-center justify-center text-3xl mb-2 shadow-lg">${ACCOUNT_TYPES[a.type].icon}</span>
+      <p class="font-semibold text-slate-700">${esc(a.name)}</p>
+      <p class="text-[11px] text-slate-400">${ACCOUNT_TYPES[a.type].label}</p>
+      <p class="text-3xl font-extrabold text-slate-800 mt-2">฿${fmtMoney(a.balance)}</p>
+    </div>
+    <p class="text-xs font-medium text-slate-500 mt-3 mb-1.5">รายการล่าสุดในบัญชีนี้</p>
+    <div class="divide-y divide-white/50 max-h-56 overflow-y-auto no-scrollbar">
+      ${recent.map(t=>txnRow(s,t)).join('') || emptyRow()}
+    </div>
+  </div>`;
+}
+
+/* ---- Add account modal ---- */
+function modalAddAccount(){
+  const types = Object.keys(ACCOUNT_TYPES).filter(t=>t!=='cash');
+  return `
+  ${modalHeader('เพิ่มบัญชีใหม่')}
+  <div class="px-5 pb-6 space-y-3.5">
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ชื่อบัญชี</label>
+      <input id="f-accname" type="text" placeholder="เช่น เงินเก็บฉุกเฉิน" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ประเภทบัญชี</label>
+      <div class="grid grid-cols-3 gap-2 mt-1.5">
+        ${types.map((t,i)=>`
+          <label class="glass-btn rounded-xl p-2.5 flex flex-col items-center gap-1 cursor-pointer has-[:checked]:ring-2 has-[:checked]:ring-pink-400">
+            <input type="radio" name="f-acctype" value="${t}" ${i===0?'checked':''} class="hidden">
+            <span class="text-xl">${ACCOUNT_TYPES[t].icon}</span>
+            <span class="text-[10px] text-slate-600 text-center">${ACCOUNT_TYPES[t].label}</span>
+          </label>`).join('')}
+      </div>
+    </div>
+    <button onclick="submitAddAccount()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">เพิ่มบัญชี</button>
+  </div>`;
+}
+async function submitAddAccount(){
+  const s = curStudent();
+  if(s.accounts.length>=MAX_ACCOUNTS){ alert('มีบัญชีครบจำนวนสูงสุดแล้ว'); return; }
+  const name = document.getElementById('f-accname').value.trim();
+  const type = document.querySelector('input[name="f-acctype"]:checked').value;
+  if(!name){ alert('กรุณาระบุชื่อบัญชี'); return; }
+  try{
+    await callRpc('add_account', {p_token:TOKEN, p_name:name, p_type:type});
+    await refreshAppState();
+    closeModal();
+  }catch(e){ alert(e.message); }
+}
+async function deleteAccount(accountId){
+  if(!confirm('ยืนยันการลบบัญชีนี้?')) return;
+  try{
+    await callRpc('delete_account', {p_token:TOKEN, p_account_id:accountId});
+    await refreshAppState();
+    render();
+  }catch(e){ alert(e.message); }
+}
+
+/* ---- Add category modal ---- */
+function modalAddCategory(kind){
+  const isExp = kind==='expense';
+  return `
+  ${modalHeader('เพิ่มหมวด'+(isExp?'รายจ่าย':'รายรับ')+'ใหม่')}
+  <div class="px-5 pb-6 space-y-3.5">
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ไอคอน (emoji)</label>
+      <input id="f-caticon" type="text" maxlength="2" value="${isExp?'🏷️':'💵'}" class="w-16 mt-1 glass-btn rounded-xl px-3 py-2.5 text-xl text-center">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ชื่อหมวดหมู่</label>
+      <input id="f-catname" type="text" placeholder="เช่น ค่าใช้จ่ายส่วนตัว" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <button onclick="submitAddCategory('${kind}')" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">เพิ่มหมวดหมู่</button>
+  </div>`;
+}
+async function submitAddCategory(kind){
+  const s = curStudent();
+  const isExp = kind==='expense';
+  const list = isExp ? s.expenseCategories : s.incomeCategories;
+  const max = isExp ? MAX_EXPENSE_CATS : MAX_INCOME_CATS;
+  if(list.length>=max){ alert('มีหมวดหมู่ครบจำนวนสูงสุดแล้ว'); return; }
+  const name = document.getElementById('f-catname').value.trim();
+  const iconVal = document.getElementById('f-caticon').value.trim() || (isExp?'🏷️':'💵');
+  if(!name){ alert('กรุณาระบุชื่อหมวดหมู่'); return; }
+  try{
+    await callRpc('add_category', {p_token:TOKEN, p_kind:kind, p_name:name, p_icon:iconVal});
+    await refreshAppState();
+    closeModal();
+  }catch(e){ alert(e.message); }
+}
+async function deleteCategory(kind, catId){
+  try{
+    await callRpc('delete_category', {p_token:TOKEN, p_kind:kind, p_category_id:catId});
+    await refreshAppState();
+    render();
+  }catch(e){ alert(e.message); }
+}
+
+/* =========================================================================
+   ADVISOR SHELL
+   ========================================================================= */
+function renderAdvisorShell(){
+  const advisor = ME;
+  if(state.advisorSelectedStudentId){
+    return renderAdvisorStudentDetail();
+  }
+  const students = studentsOf(state.advisorId);
+  return `
+  <div class="animate-fade">
+    <div class="glass rounded-[24px] p-5 mb-4 flex items-center gap-3">
+      <span class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-xl shadow">${icon('users','w-6 h-6')}</span>
+      <div>
+        <p class="font-bold text-slate-800">${esc(advisor.name)}</p>
+        <p class="text-xs text-slate-400">${esc(advisor.dept||'')} · ดูแลนักศึกษา ${students.length} คน</p>
+      </div>
+    </div>
+    <div class="grid sm:grid-cols-2 md:grid-cols-3 gap-3.5">
+      ${students.map(u=>{
+        const s = DB.students[u.id];
+        const total = totalBalance(u.id);
+        return `
+        <button onclick="openAdvisorStudent('${u.id}')" class="tap glass rounded-[22px] p-4 text-left">
+          <div class="flex items-center gap-2.5 mb-2">
+            <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-400 to-rose-400 flex items-center justify-center text-white font-bold">${esc(u.name[0])}</span>
+            <div class="min-w-0"><p class="text-sm font-semibold text-slate-700 truncate">${esc(u.name)}</p><p class="text-[11px] text-slate-400 truncate">${esc(u.major||'')}</p></div>
+          </div>
+          <p class="text-[11px] text-slate-400">ยอดเงินคงเหลือรวม</p>
+          <p class="text-xl font-bold text-slate-800">฿${fmtMoney(total)}</p>
+          <p class="text-[11px] text-pink-500 mt-1.5">${s.accountCount} บัญชี · ${s.txnCount} รายการ</p>
+        </button>`;
+      }).join('') || `<p class="text-sm text-slate-400 col-span-full text-center py-10">ยังไม่มีนักศึกษาในความดูแล</p>`}
+    </div>
+  </div>`;
+}
+async function openAdvisorStudent(sid){
+  try{
+    const detail = await callRpc('get_student_detail', {p_token:TOKEN, p_student_id:sid});
+    DB.students[sid] = {
+      accounts: detail.accounts,
+      expenseCategories: detail.expenseCategories,
+      incomeCategories: detail.incomeCategories,
+      transactions: detail.transactions,
+    };
+    setState({advisorSelectedStudentId: sid, advisorView:'overview', advisorReportMonth:null});
+  }catch(e){ alert(e.message); }
+}
+function renderAdvisorStudentDetail(){
+  const sid = state.advisorSelectedStudentId;
+  const u = DB.users.find(x=>x.id===sid);
+  const s = DB.students[sid];
+  const total = totalBalance(sid);
+  return `
+  <div class="animate-fade">
+    <button onclick="setState({advisorSelectedStudentId:null})" class="tap flex items-center gap-1.5 text-sm text-slate-600 mb-3">${icon('back','w-4 h-4')} กลับไปหน้ารายชื่อ</button>
+    <div class="glass rounded-[24px] p-5 mb-4 flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-3">
+        <span class="w-12 h-12 rounded-2xl bg-gradient-to-br from-pink-400 to-rose-400 flex items-center justify-center text-white font-bold text-lg">${esc(u.name[0])}</span>
+        <div><p class="font-bold text-slate-800">${esc(u.name)}</p><p class="text-xs text-slate-400">${esc(u.email)} · ${esc(u.major||'')}</p></div>
+      </div>
+      <div class="text-right"><p class="text-[11px] text-slate-400">ยอดเงินคงเหลือรวม</p><p class="text-2xl font-extrabold text-slate-800">฿${fmtMoney(total)}</p></div>
+    </div>
+
+    <div class="glass rounded-2xl p-1.5 flex items-center gap-1 mb-4 w-fit no-print">
+      ${advisorViewTab('overview','ภาพรวม & สถิติ','pie')}
+      ${advisorViewTab('report','รายงานสรุปประจำเดือน','report')}
+    </div>
+
+    ${state.advisorView==='report' ? renderAdvisorReportSection(sid) : renderAdvisorOverviewSection(sid)}
+  </div>`;
+}
+function advisorViewTab(v,label,ic){
+  return `<button onclick="setState({advisorView:'${v}'})" class="tap flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition
+    ${state.advisorView===v?'bg-white/70 text-pink-600 shadow-sm':'text-slate-600 hover:bg-white/40'}">${icon(ic,'w-4 h-4')} ${label}</button>`;
+}
+function renderAdvisorOverviewSection(sid){
+  const s = DB.students[sid];
+  const months = allMonthsFor(sid);
+  const mkey = months[0];
+  const data = mkey ? expenseByCategory(sid, mkey) : [];
+  const totalExp = data.reduce((a,d)=>a+d.total,0);
+  const allTxns = [...s.transactions].sort((a,b)=>b.date.localeCompare(a.date));
+  return `
+  <div class="grid md:grid-cols-5 gap-4">
+    <div class="md:col-span-2 glass rounded-[24px] p-4">
+      <p class="font-semibold text-slate-700 mb-2">สัดส่วนรายจ่าย ${mkey?'· '+monthLabel(mkey):''}</p>
+      ${totalExp>0 ? `<div class="relative h-52"><canvas id="advisorDonutChart"></canvas></div>` : `<p class="text-sm text-slate-400 text-center py-14">ไม่มีข้อมูล</p>`}
+    </div>
+    <div class="md:col-span-3 glass rounded-[24px] p-4">
+      <p class="font-semibold text-slate-700 mb-2">รายการรายรับ-รายจ่ายทั้งหมด</p>
+      <div class="divide-y divide-white/50 max-h-[420px] overflow-y-auto no-scrollbar">
+        ${allTxns.map(t=>txnRow(s,t)).join('') || emptyRow()}
+      </div>
+    </div>
+  </div>`;
+}
+function renderAdvisorReportSection(sid){
+  const s = DB.students[sid]; const u = DB.users.find(x=>x.id===sid);
+  const months = allMonthsFor(sid);
+  if(!state.advisorReportMonth || !months.includes(state.advisorReportMonth)) state.advisorReportMonth = months[0] || TODAY.slice(0,7);
+  const mkey = state.advisorReportMonth;
+  const incomes = monthTxns(sid, mkey,'income').sort((a,b)=>a.date.localeCompare(b.date));
+  const expenses = monthTxns(sid, mkey,'expense').sort((a,b)=>a.date.localeCompare(b.date));
+  const totalIn = incomes.reduce((a,t)=>a+Number(t.amount),0);
+  const totalEx = expenses.reduce((a,t)=>a+Number(t.amount),0);
+  const net = totalIn-totalEx;
+  const monthOpts = months.map(m=>`<option value="${m}" ${m===mkey?'selected':''}>${monthLabel(m)}</option>`).join('');
+
+  const incRows = incomes.map(t=>`<tr class="border-b border-white/40"><td class="py-1.5 pr-2 text-xs text-slate-500">${fmtDateShort(t.date)}</td><td class="py-1.5 pr-2 text-sm text-slate-700">${catInfo(s.incomeCategories,t.categoryId).icon} ${esc(catInfo(s.incomeCategories,t.categoryId).name)}</td><td class="py-1.5 text-sm font-semibold text-emerald-600 text-right">฿${fmtMoney(t.amount)}</td></tr>`).join('');
+  const expRows = expenses.map(t=>`<tr class="border-b border-white/40"><td class="py-1.5 pr-2 text-xs text-slate-500">${fmtDateShort(t.date)}</td><td class="py-1.5 pr-2 text-sm text-slate-700">${catInfo(s.expenseCategories,t.categoryId).icon} ${esc(catInfo(s.expenseCategories,t.categoryId).name)}</td><td class="py-1.5 text-sm font-semibold text-rose-600 text-right">฿${fmtMoney(t.amount)}</td></tr>`).join('');
+
+  document.getElementById('print-area').innerHTML = buildPrintReport(u.name, mkey, incomes, expenses, s, totalIn, totalEx, net);
+
+  return `
+  <div class="glass rounded-[24px] p-4 sm:p-5 animate-in">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <p class="font-semibold text-slate-700 text-lg">รายงานสรุปประจำเดือน · ${esc(u.name)}</p>
+      <div class="flex items-center gap-2">
+        <select onchange="setState({advisorReportMonth:this.value})" class="glass-btn text-xs rounded-lg px-2 py-1.5">${monthOpts}</select>
+        <button onclick="window.print()" class="tap flex items-center gap-1.5 bg-gradient-to-r from-slate-600 to-slate-700 text-white text-xs font-medium px-3 py-2 rounded-lg shadow">${icon('printer','w-4 h-4')} พิมพ์รายงาน (PDF)</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      <div class="glass-btn rounded-xl p-3 text-center"><p class="text-[11px] text-slate-500">รายรับรวม</p><p class="text-base sm:text-lg font-bold text-emerald-600">฿${fmtMoney(totalIn)}</p></div>
+      <div class="glass-btn rounded-xl p-3 text-center"><p class="text-[11px] text-slate-500">รายจ่ายรวม</p><p class="text-base sm:text-lg font-bold text-rose-600">฿${fmtMoney(totalEx)}</p></div>
+      <div class="glass-btn rounded-xl p-3 text-center"><p class="text-[11px] text-slate-500">คงเหลือสุทธิ</p><p class="text-base sm:text-lg font-bold ${net>=0?'text-slate-700':'text-rose-600'}">฿${fmtMoney(net)}</p></div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="bg-white/40 rounded-2xl p-3.5">
+        <p class="text-sm font-semibold text-emerald-600 mb-2 flex items-center gap-1.5">${icon('income','w-4 h-4')} รายรับ (${incomes.length} รายการ)</p>
+        <table class="w-full"><tbody>${incRows || '<tr><td class="text-xs text-slate-400 py-4">ไม่มีรายการ</td></tr>'}</tbody></table>
+      </div>
+      <div class="bg-white/40 rounded-2xl p-3.5">
+        <p class="text-sm font-semibold text-rose-600 mb-2 flex items-center gap-1.5">${icon('expense','w-4 h-4')} รายจ่าย (${expenses.length} รายการ)</p>
+        <table class="w-full"><tbody>${expRows || '<tr><td class="text-xs text-slate-400 py-4">ไม่มีรายการ</td></tr>'}</tbody></table>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   ADMIN SHELL
+   ========================================================================= */
+function renderAdminShell(){
+  const students = DB.users.filter(u=>u.role==='student');
+  const advisors = DB.users.filter(u=>u.role==='advisor');
+  const roleTag = (r) => r==='student' ? `<span class="text-[11px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-600 font-medium">นักศึกษา</span>` : `<span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">อาจารย์ที่ปรึกษา</span>`;
+  const rows = [...advisors, ...students].map(u=>{
+    const advisorName = u.role==='student' ? (DB.users.find(a=>a.id===u.advisorId)||{}).name : '-';
+    const extra = u.role==='student' ? `฿${fmtMoney(totalBalance(u.id))}` : `${studentsOf(u.id).length} คน`;
+    return `
+    <tr class="border-b border-white/40 hover:bg-white/30">
+      <td class="py-2.5 px-2">
+        <div class="flex items-center gap-2.5">
+          <span class="w-9 h-9 rounded-xl bg-gradient-to-br ${u.role==='student'?'from-pink-400 to-rose-400':'from-indigo-400 to-indigo-600'} flex items-center justify-center text-white text-sm font-bold shrink-0">${esc(u.name[0])}</span>
+          <div class="min-w-0"><p class="text-sm font-medium text-slate-700 truncate">${esc(u.name)}</p><p class="text-[11px] text-slate-400 truncate">${esc(u.email)}</p></div>
+        </div>
+      </td>
+      <td class="py-2.5 px-2">${roleTag(u.role)}</td>
+      <td class="py-2.5 px-2 text-xs text-slate-500">${esc(advisorName)}</td>
+      <td class="py-2.5 px-2 text-sm font-medium text-slate-600">${extra}</td>
+      <td class="py-2.5 px-2 text-right">
+        <button onclick="openModal({type:'userForm', mode:'edit', userId:'${u.id}'})" class="tap text-slate-400 hover:text-pink-600 p-1.5">${icon('edit','w-4 h-4')}</button>
+        <button onclick="deleteUser('${u.id}')" class="tap text-slate-400 hover:text-rose-600 p-1.5">${icon('trash','w-4 h-4')}</button>
+      </td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="animate-fade">
+    <div class="glass rounded-[24px] p-4 sm:p-5">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <p class="font-bold text-slate-800 text-lg">จัดการผู้ใช้งานระบบ</p>
+          <p class="text-xs text-slate-400">นักศึกษา ${students.length} คน · อาจารย์ที่ปรึกษา ${advisors.length} คน</p>
+        </div>
+        <button onclick="openModal({type:'userForm', mode:'add'})" class="tap flex items-center gap-1.5 bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-medium px-3.5 py-2.5 rounded-xl shadow-md shadow-pink-200">${icon('plus','w-4 h-4')} เพิ่มผู้ใช้งาน</button>
+      </div>
+      <div class="overflow-x-auto no-scrollbar">
+        <table class="w-full min-w-[560px]">
+          <thead><tr class="text-left text-[11px] text-slate-400 border-b border-white/50">
+            <th class="py-2 px-2 font-medium">ชื่อ-นามสกุล</th><th class="py-2 px-2 font-medium">บทบาท</th><th class="py-2 px-2 font-medium">อาจารย์ที่ปรึกษา</th><th class="py-2 px-2 font-medium">ยอดเงิน/จำนวนนศ.</th><th class="py-2 px-2"></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+function modalUserForm(mode, userId){
+  const isEdit = mode==='edit';
+  const u = isEdit ? DB.users.find(x=>x.id===userId) : null;
+  const advisors = DB.users.filter(x=>x.role==='advisor');
+  return `
+  ${modalHeader(isEdit?'แก้ไขข้อมูลผู้ใช้':'เพิ่มผู้ใช้งานใหม่')}
+  <div class="px-5 pb-6 space-y-3.5">
+    <div>
+      <label class="text-xs text-slate-500 font-medium">บทบาท</label>
+      <select id="f-role" onchange="renderModal(); document.getElementById('f-role').value=this.value; toggleAdvisorField();" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700" ${isEdit?'disabled':''}>
+        <option value="student" ${u&&u.role==='student'?'selected':''}>นักศึกษา</option>
+        <option value="advisor" ${u&&u.role==='advisor'?'selected':''}>อาจารย์ที่ปรึกษา</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ชื่อ-นามสกุล</label>
+      <input id="f-name" type="text" value="${u?esc(u.name):''}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">อีเมล</label>
+      <input id="f-email" type="email" value="${u?esc(u.email):''}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div id="f-advisorwrap" class="${(u&&u.role==='advisor')?'hidden':''}">
+      <label class="text-xs text-slate-500 font-medium">สาขา / อาจารย์ที่ปรึกษา</label>
+      <input id="f-major" type="text" placeholder="สาขาวิชา" value="${u?esc(u.major||''):''}" class="w-full mt-1 mb-2 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+      <select id="f-advisor" class="w-full glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+        ${advisors.map(a=>`<option value="${a.id}" ${u&&u.advisorId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="border-t border-white/50 pt-3.5 grid grid-cols-2 gap-2.5">
+      <div>
+        <label class="text-xs text-slate-500 font-medium">ชื่อผู้ใช้งาน (Username)</label>
+        <input id="f-username" type="text" placeholder="อัตโนมัติจากอีเมล" value="${u?esc(u.username):''}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 font-medium">รหัสผ่าน ${isEdit?'(เว้นว่างถ้าไม่เปลี่ยน)':`(ค่าเริ่มต้น ${DEFAULT_PASSWORD})`}</label>
+        <input id="f-password" type="text" placeholder="${isEdit?'••••':DEFAULT_PASSWORD}" value="${isEdit?'':DEFAULT_PASSWORD}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+      </div>
+    </div>
+    <button onclick="submitUserForm('${mode}', ${isEdit?`'${userId}'`:'null'})" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">${isEdit?'บันทึกการแก้ไข':'เพิ่มผู้ใช้งาน'}</button>
+  </div>`;
+}
+function toggleAdvisorField(){
+  const role = document.getElementById('f-role').value;
+  document.getElementById('f-advisorwrap').classList.toggle('hidden', role==='advisor');
+}
+async function submitUserForm(mode, userId){
+  const role = document.getElementById('f-role').value;
+  const name = document.getElementById('f-name').value.trim();
+  const email = document.getElementById('f-email').value.trim();
+  let username = document.getElementById('f-username').value.trim();
+  const password = document.getElementById('f-password').value;
+  if(!name || !email){ alert('กรุณากรอกชื่อและอีเมลให้ครบถ้วน'); return; }
+  if(!username) username = usernameFromEmail(email);
+  try{
+    if(mode==='add'){
+      const advisorId = role==='student' ? document.getElementById('f-advisor').value : null;
+      const major = role==='student' ? document.getElementById('f-major').value.trim() : null;
+      await callRpc('admin_create_user', {
+        p_token:TOKEN, p_role:role, p_name:name, p_email:email, p_username:username,
+        p_password: password || DEFAULT_PASSWORD, p_advisor_id:advisorId, p_major:major,
+        p_dept: role==='advisor' ? '' : null,
+      });
+    } else {
+      const target = DB.users.find(x=>x.id===userId);
+      const advisorId = target.role==='student' ? document.getElementById('f-advisor').value : null;
+      const major = target.role==='student' ? document.getElementById('f-major').value.trim() : null;
+      await callRpc('admin_update_user', {
+        p_token:TOKEN, p_target_id:userId, p_name:name, p_email:email, p_username:username,
+        p_password: password || null, p_advisor_id:advisorId, p_major:major,
+      });
+    }
+    await refreshAppState();
+    closeModal();
+  }catch(e){ alert(e.message); }
+}
+async function deleteUser(userId){
+  const u = DB.users.find(x=>x.id===userId);
+  if(!u) return;
+  const label = u.role==='advisor' ? 'อาจารย์ที่ปรึกษา' : 'นักศึกษา';
+  if(!confirm(`ยืนยันการลบ${label} "${u.name}"? ข้อมูลที่เกี่ยวข้องทั้งหมดจะถูกลบไปด้วยและไม่สามารถกู้คืนได้`)) return;
+  try{
+    const result = await callRpc('admin_delete_user', {p_token:TOKEN, p_target_id:userId, p_cascade:false});
+    if(result && result.needsCascadeConfirm){
+      const names = (result.students||[]).join(', ');
+      const ok = confirm(`อาจารย์ "${u.name}" มีนักศึกษาในความดูแล ${result.count} คน (${names})\n\nการลบจะลบข้อมูลของนักศึกษาทั้งหมดที่เกี่ยวข้องไปด้วย ทั้งบัญชี หมวดหมู่ และประวัติธุรกรรมทั้งหมด และไม่สามารถกู้คืนได้\n\nต้องการดำเนินการต่อหรือไม่?`);
+      if(!ok) return;
+      await callRpc('admin_delete_user', {p_token:TOKEN, p_target_id:userId, p_cascade:true});
+    }
+    await refreshAppState();
+    render();
+  }catch(e){ alert(e.message); }
+}
+
+/* ---------- My Account (self-service username/password) ---------- */
+function modalMyAccount(){
+  const user = currentLoggedInUser();
+  const roleLabel = {admin:'ผู้ดูแลระบบ', advisor:'อาจารย์ที่ปรึกษา', student:'นักศึกษา'}[user.role];
+  return `
+  ${modalHeader('บัญชีของฉัน')}
+  <div class="px-5 pb-6 space-y-3.5">
+    <div class="flex items-center gap-3 bg-white/40 rounded-2xl p-3.5">
+      <span class="w-11 h-11 rounded-xl bg-gradient-to-br from-pink-400 to-rose-400 flex items-center justify-center text-white font-bold shrink-0">${esc(user.name[0])}</span>
+      <div class="min-w-0"><p class="text-sm font-semibold text-slate-700 truncate">${esc(user.name)}</p><p class="text-[11px] text-slate-400">${roleLabel} · ${esc(user.email)}</p></div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ชื่อผู้ใช้งาน (Username)</label>
+      <input id="acc-username" type="text" value="${esc(user.username)}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div class="border-t border-white/50 pt-3.5">
+      <label class="text-xs text-slate-500 font-medium">รหัสผ่านใหม่ (เว้นว่างหากไม่ต้องการเปลี่ยน)</label>
+      <input id="acc-password" type="password" placeholder="รหัสผ่านใหม่" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 font-medium">ยืนยันรหัสผ่านใหม่</label>
+      <input id="acc-password2" type="password" placeholder="กรอกรหัสผ่านใหม่อีกครั้ง" onkeydown="if(event.key==='Enter') submitMyAccount('${user.id}')" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
+    </div>
+    <button onclick="submitMyAccount('${user.id}')" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">บันทึกการเปลี่ยนแปลง</button>
+  </div>`;
+}
+async function submitMyAccount(userId){
+  const username = document.getElementById('acc-username').value.trim();
+  const pwd1 = document.getElementById('acc-password').value;
+  const pwd2 = document.getElementById('acc-password2').value;
+  if(!username){ alert('กรุณากรอกชื่อผู้ใช้งาน'); return; }
+  if(pwd1 || pwd2){
+    if(pwd1 !== pwd2){ alert('รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน'); return; }
+    if(pwd1.length < 4){ alert('รหัสผ่านใหม่ควรมีความยาวอย่างน้อย 4 ตัวอักษร'); return; }
+  }
+  try{
+    await callRpc('update_my_account', {p_token:TOKEN, p_username:username, p_new_password: pwd1 || null});
+    ME.username = username;
+    closeModal();
+    alert('บันทึกข้อมูลบัญชีเรียบร้อยแล้ว');
+  }catch(e){ alert(e.message); }
+}
+
+function toggleCategory(catId){ state.expandedCategoryId = state.expandedCategoryId===catId ? null : catId; render(); }
+
+/* =========================================================================
+   INIT — กู้คืนเซสชันเดิมจาก localStorage ถ้ามี ไม่งั้นแสดงหน้า login
+   ========================================================================= */
+(async function initApp(){
+  const savedToken = getToken();
+  if(savedToken){
+    TOKEN = savedToken;
+    try{
+      const data = await callRpc('get_app_state', {p_token:TOKEN});
+      applyAppState(data);
+      state.role = ME.role;
+      if(ME.role==='student') state.currentStudentId = ME.id;
+      if(ME.role==='advisor') state.advisorId = ME.id;
+      state.view = 'app';
+    }catch(e){
+      TOKEN = null;
+      clearToken();
+      state.view = 'login';
+    }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
