@@ -300,9 +300,9 @@ function renderLoginPage(){
   <div class="min-h-screen flex items-center justify-center px-4 py-10 sm:py-16">
     <div class="w-full max-w-md">
       <div class="glass rounded-[28px] p-7 sm:p-9 flex flex-col justify-center animate-in">
-        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-400 flex items-center justify-center text-white text-2xl shadow-lg shadow-pink-300/50 mb-4">💗</div>
-        <p class="text-xl font-bold text-slate-800 mb-1">เข้าสู่ระบบ</p>
-        <p class="text-sm text-slate-500 mb-6">ระบบจัดการการเงินนักศึกษา โครงการครูคืนถิ่น</p>
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-pink-500 to-rose-400 flex items-center justify-center text-white text-2xl shadow-lg shadow-pink-300/50 mb-4">💗</div>
+        <p class="text-xl font-bold text-slate-800 mb-1 text-center">เข้าสู่ระบบ</p>
+        <p class="text-sm text-slate-500 mb-6 text-center">ระบบจัดการการเงินนักศึกษา โครงการครูคืนถิ่น</p>
         ${state.loginError ? `<div class="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">${esc(state.loginError)}</div>` : ''}
         <div class="space-y-3">
           <div>
