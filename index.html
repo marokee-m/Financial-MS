@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-<title>ระบบจัดการการเงินนักศึกษา | โครงการครูคืนถิ่น</title>
+<title>ระบบจัดการการเงินนักศึกษา | โครงการครูรัก(ษ์)ถิ่น</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -66,7 +66,7 @@
   @media print{
     body *{visibility:hidden;}
     #print-area, #print-area *{visibility:visible;}
-    #print-area{position:absolute;left:0;top:0;width:100%;padding:24px;}
+    #print-area{display:block!important;position:absolute;left:0;top:0;width:100%;padding:24px;}
     .no-print{display:none!important;}
   }
   #print-area{display:none;}
@@ -180,6 +180,21 @@ async function callRpc(name, params){
   return data;
 }
 
+/* ป้องกันการกดปุ่มบันทึก/ยืนยันซ้ำระหว่างรอผลลัพธ์จากเซิร์ฟเวอร์ */
+function setBtnLoading(btn, loading, loadingText){
+  if(!btn) return;
+  if(loading){
+    if(btn.dataset.origLabel===undefined) btn.dataset.origLabel = btn.innerHTML;
+    btn.innerHTML = loadingText || 'กำลังบันทึก...';
+    btn.disabled = true;
+    btn.classList.add('opacity-60','pointer-events-none');
+  } else {
+    if(btn.dataset.origLabel!==undefined) btn.innerHTML = btn.dataset.origLabel;
+    btn.disabled = false;
+    btn.classList.remove('opacity-60','pointer-events-none');
+  }
+}
+
 /* =========================================================================
    DATA MODEL (ข้อมูลจะถูกโหลดจาก Supabase หลัง login เท่านั้น ไม่มีข้อมูลจำลอง)
    ========================================================================= */
@@ -248,6 +263,11 @@ function setState(patch){ Object.assign(state, patch); render(); }
    ========================================================================= */
 function curStudent(){ return DB.students[state.currentStudentId]; }
 function curUser(){ return DB.users.find(u=>u.id===state.currentStudentId); }
+/* คืนค่านักศึกษาที่กำลังดูอยู่ ณ ตอนนี้ ไม่ว่าจะมองจากมุมนักศึกษาเอง หรือจากอาจารย์ที่กำลังดูรายละเอียด */
+function contextStudentId(){
+  return state.role==='student' ? state.currentStudentId : state.advisorSelectedStudentId;
+}
+function contextStudent(){ return DB.students[contextStudentId()]; }
 function studentsOf(advisorId){ return DB.users.filter(u=>u.role==='student' && u.advisorId===advisorId); }
 function accountName(s,id){ const a=s.accounts.find(x=>x.id===id); return a? a.name : 'บัญชีที่ถูกลบ'; }
 function catInfo(list,id){ return list.find(c=>c.id===id) || {name:'หมวดที่ถูกลบ', icon:'❓'}; }
@@ -302,7 +322,7 @@ function renderLoginPage(){
       <div class="glass rounded-[28px] p-7 sm:p-9 flex flex-col justify-center animate-in">
         <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-pink-500 to-rose-400 flex items-center justify-center text-white text-2xl shadow-lg shadow-pink-300/50 mb-4">💗</div>
         <p class="text-xl font-bold text-slate-800 mb-1 text-center">เข้าสู่ระบบ</p>
-        <p class="text-sm text-slate-500 mb-6 text-center">ระบบจัดการการเงินนักศึกษา โครงการครูคืนถิ่น</p>
+        <p class="text-sm text-slate-500 mb-6 text-center">ระบบจัดการการเงินนักศึกษา โครงการครูรัก(ษ์)ถิ่น</p>
         ${state.loginError ? `<div class="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">${esc(state.loginError)}</div>` : ''}
         <div class="space-y-3">
           <div>
@@ -314,8 +334,8 @@ function renderLoginPage(){
             <input id="login-password" type="password" placeholder="รหัสผ่าน" onkeydown="if(event.key==='Enter') submitLogin()" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
           </div>
         </div>
-        <button onclick="submitLogin()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-5">เข้าสู่ระบบ</button>
-        <p class="text-[11px] text-slate-400 mt-4 text-center leading-relaxed">พัฒนาโดย อาจารย์มะรอกี แมเดะา<br>สาขาคณิตศาสตร์ คณะวิทยาศาสตร์เทคโนโลยีและการเกษตร</p>
+        <button id="login-submit-btn" onclick="submitLogin()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-5">เข้าสู่ระบบ</button>
+        <p class="text-[11px] text-slate-400 mt-4 text-center leading-relaxed">พัฒนาโดย อาจารย์มะรอกี แมเดาะ<br>สาขาคณิตศาสตร์ คณะวิทยาศาสตร์เทคโนโลยีและการเกษตร</p>
       </div>
     </div>
   </div>`;
@@ -326,12 +346,15 @@ async function submitLogin(){
   const password = document.getElementById('login-password').value;
   state.loginUsername = username;
   if(!username || !password){ setState({loginError:'กรุณากรอกชื่อผู้ใช้งานและรหัสผ่าน'}); return; }
+  const btn = document.getElementById('login-submit-btn');
+  setBtnLoading(btn, true, 'กำลังเข้าสู่ระบบ...');
   try{
     const data = await callRpc('login', {p_username:username, p_password:password});
     TOKEN = data.token;
     saveToken(TOKEN);
     await enterAppAsLoggedIn();
   }catch(e){
+    setBtnLoading(btn, false);
     setState({loginError: e.message});
   }
 }
@@ -386,7 +409,7 @@ function renderTopBar(){
           <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-400 flex items-center justify-center text-white text-lg shadow-md shadow-pink-300/50 shrink-0">💗</div>
           <div class="min-w-0 hidden sm:block">
             <p class="font-semibold text-sm leading-tight text-slate-700 truncate">ระบบจัดการการเงินนักศึกษา</p>
-            <p class="text-[11px] text-pink-500 leading-tight -mt-0.5">โครงการครูคืนถิ่น</p>
+            <p class="text-[11px] text-pink-500 leading-tight -mt-0.5">โครงการครูรัก(ษ์)ถิ่น</p>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
@@ -714,7 +737,7 @@ function buildPrintReport(name, mkey, incomes, expenses, s, totalIn, totalEx, ne
   return `
   <div style="font-family:'Prompt',sans-serif; color:#333; max-width:800px; margin:0 auto;">
     <h2 style="margin-bottom:2px;">รายงานสรุปการเงินประจำเดือน ${monthLabel(mkey)}</h2>
-    <p style="margin-top:0;color:#666;">โครงการครูคืนถิ่น — นักศึกษา: ${esc(name)}</p>
+    <p style="margin-top:0;color:#666;">โครงการครูรัก(ษ์)ถิ่น — นักศึกษา: ${esc(name)}</p>
     <table style="width:100%; border-collapse:collapse; margin-top:10px;">
       <tr><td style="padding:4px 0;">รายรับรวม</td><td style="text-align:right; color:#059669; font-weight:bold;">฿${fmtMoney(totalIn)}</td></tr>
       <tr><td style="padding:4px 0;">รายจ่ายรวม</td><td style="text-align:right; color:#e11d48; font-weight:bold;">฿${fmtMoney(totalEx)}</td></tr>
@@ -867,7 +890,7 @@ function modalAddTxn(type, editTxn){
       <label class="text-xs text-slate-500 font-medium">โน้ตเพิ่มเติม (ไม่บังคับ)</label>
       <input id="f-note" type="text" value="${editTxn?esc(editTxn.note||''):''}" placeholder="เช่น ค่าอาหารเที่ยง" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
     </div>
-    <button onclick="submitTxn('${type}', ${isEdit?`'${editTxn.id}'`:'null'})" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r ${accentGrad} shadow-lg mt-2">
+    <button id="modal-submit-btn" onclick="submitTxn('${type}', ${isEdit?`'${editTxn.id}'`:'null'})" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r ${accentGrad} shadow-lg mt-2">
       ${isEdit?'บันทึกการแก้ไข':'บันทึกรายการ'}
     </button>
   </div>`;
@@ -879,6 +902,8 @@ async function submitTxn(type, editId){
   const amount = parseFloat(document.getElementById('f-amt').value);
   const note = document.getElementById('f-note').value.trim();
   if(!date || !amount || amount<=0){ alert('กรุณากรอกวันที่และจำนวนเงินให้ถูกต้อง'); return; }
+  const btn = document.getElementById('modal-submit-btn');
+  setBtnLoading(btn, true);
   try{
     if(editId){
       await callRpc('edit_transaction', {p_token:TOKEN, p_txn_id:editId, p_date:date, p_category_id:categoryId, p_account_id:accountId, p_amount:amount, p_note:note});
@@ -887,7 +912,7 @@ async function submitTxn(type, editId){
     }
     await refreshAppState();
     closeModal();
-  }catch(e){ alert(e.message); }
+  }catch(e){ setBtnLoading(btn, false); alert(e.message); }
 }
 
 /* ---- Transfer ---- */
@@ -922,7 +947,7 @@ function modalTransfer(){
       <input id="f-note" type="text" placeholder="เช่น ออมเงินเดือนนี้" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
     </div>
     <p class="text-[11px] text-slate-400">* รายการโอนจะไม่ถูกนับเป็นรายรับหรือรายจ่ายของระบบ</p>
-    <button onclick="submitTransfer()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-slate-600 to-slate-800 shadow-lg mt-2">ยืนยันการโอนเงิน</button>
+    <button id="modal-submit-btn" onclick="submitTransfer()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-slate-600 to-slate-800 shadow-lg mt-2">ยืนยันการโอนเงิน</button>
   </div>`;
 }
 async function submitTransfer(){
@@ -936,16 +961,18 @@ async function submitTransfer(){
   if(!amount || amount<=0){ alert('กรุณากรอกจำนวนเงินให้ถูกต้อง'); return; }
   const fromAcc = s.accounts.find(a=>a.id===from);
   if(fromAcc.balance < amount){ if(!confirm('ยอดเงินในบัญชีต้นทางไม่พอ ต้องการดำเนินการต่อหรือไม่? (ยอดจะติดลบ)')) return; }
+  const btn = document.getElementById('modal-submit-btn');
+  setBtnLoading(btn, true);
   try{
     await callRpc('add_transfer', {p_token:TOKEN, p_date:date, p_from_account_id:from, p_to_account_id:to, p_amount:amount, p_note:note});
     await refreshAppState();
     closeModal();
-  }catch(e){ alert(e.message); }
+  }catch(e){ setBtnLoading(btn, false); alert(e.message); }
 }
 
 /* ---- Transaction detail / edit / delete ---- */
 function modalTxnDetail(txnId){
-  const s = curStudent();
+  const s = contextStudent();
   const t = s.transactions.find(x=>x.id===txnId);
   if(!t) return modalHeader('ไม่พบรายการ');
   let icn,label,amtStr,amtColor,extra;
@@ -965,10 +992,11 @@ function modalTxnDetail(txnId){
       ${extra}
       ${t.note ? `<p class="text-sm text-slate-500">โน้ต: ${esc(t.note)}</p>` : ''}
     </div>
+    ${state.role==='student' ? `
     <div class="flex gap-2 mt-4">
-      ${t.type!=='transfer' ? `<button onclick="openModal({type:'editTxn', txnObj: DB.students['${state.currentStudentId}'].transactions.find(x=>x.id==='${t.id}')})" class="tap flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-1.5">${icon('edit','w-4 h-4')} แก้ไข</button>` : ''}
+      ${t.type!=='transfer' ? `<button onclick="openModal({type:'editTxn', txnObj: DB.students['${contextStudentId()}'].transactions.find(x=>x.id==='${t.id}')})" class="tap flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-1.5">${icon('edit','w-4 h-4')} แก้ไข</button>` : ''}
       <button onclick="deleteTxn('${t.id}')" class="tap flex-1 py-2.5 rounded-xl bg-rose-100 text-rose-600 font-medium flex items-center justify-center gap-1.5">${icon('trash','w-4 h-4')} ลบรายการ</button>
-    </div>
+    </div>` : ''}
   </div>`;
 }
 async function deleteTxn(txnId){
@@ -1024,7 +1052,7 @@ function modalAddAccount(){
           </label>`).join('')}
       </div>
     </div>
-    <button onclick="submitAddAccount()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">เพิ่มบัญชี</button>
+    <button id="modal-submit-btn" onclick="submitAddAccount()" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">เพิ่มบัญชี</button>
   </div>`;
 }
 async function submitAddAccount(){
@@ -1033,11 +1061,13 @@ async function submitAddAccount(){
   const name = document.getElementById('f-accname').value.trim();
   const type = document.querySelector('input[name="f-acctype"]:checked').value;
   if(!name){ alert('กรุณาระบุชื่อบัญชี'); return; }
+  const btn = document.getElementById('modal-submit-btn');
+  setBtnLoading(btn, true);
   try{
     await callRpc('add_account', {p_token:TOKEN, p_name:name, p_type:type});
     await refreshAppState();
     closeModal();
-  }catch(e){ alert(e.message); }
+  }catch(e){ setBtnLoading(btn, false); alert(e.message); }
 }
 async function deleteAccount(accountId){
   if(!confirm('ยืนยันการลบบัญชีนี้?')) return;
@@ -1062,7 +1092,7 @@ function modalAddCategory(kind){
       <label class="text-xs text-slate-500 font-medium">ชื่อหมวดหมู่</label>
       <input id="f-catname" type="text" placeholder="เช่น ค่าใช้จ่ายส่วนตัว" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
     </div>
-    <button onclick="submitAddCategory('${kind}')" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">เพิ่มหมวดหมู่</button>
+    <button id="modal-submit-btn" onclick="submitAddCategory('${kind}')" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">เพิ่มหมวดหมู่</button>
   </div>`;
 }
 async function submitAddCategory(kind){
@@ -1074,11 +1104,13 @@ async function submitAddCategory(kind){
   const name = document.getElementById('f-catname').value.trim();
   const iconVal = document.getElementById('f-caticon').value.trim() || (isExp?'🏷️':'💵');
   if(!name){ alert('กรุณาระบุชื่อหมวดหมู่'); return; }
+  const btn = document.getElementById('modal-submit-btn');
+  setBtnLoading(btn, true);
   try{
     await callRpc('add_category', {p_token:TOKEN, p_kind:kind, p_name:name, p_icon:iconVal});
     await refreshAppState();
     closeModal();
-  }catch(e){ alert(e.message); }
+  }catch(e){ setBtnLoading(btn, false); alert(e.message); }
 }
 async function deleteCategory(kind, catId){
   try{
@@ -1132,6 +1164,9 @@ async function openAdvisorStudent(sid){
       expenseCategories: detail.expenseCategories,
       incomeCategories: detail.incomeCategories,
       transactions: detail.transactions,
+      accountCount: detail.accounts.length,
+      txnCount: detail.transactions.length,
+      balance: detail.accounts.reduce((sum,a)=>sum+a.balance,0),
     };
     setState({advisorSelectedStudentId: sid, advisorView:'overview', advisorReportMonth:null});
   }catch(e){ alert(e.message); }
@@ -1318,7 +1353,7 @@ function modalUserForm(mode, userId){
         <input id="f-password" type="text" placeholder="${isEdit?'••••':DEFAULT_PASSWORD}" value="${isEdit?'':DEFAULT_PASSWORD}" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
       </div>
     </div>
-    <button onclick="submitUserForm('${mode}', ${isEdit?`'${userId}'`:'null'})" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">${isEdit?'บันทึกการแก้ไข':'เพิ่มผู้ใช้งาน'}</button>
+    <button id="modal-submit-btn" onclick="submitUserForm('${mode}', ${isEdit?`'${userId}'`:'null'})" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">${isEdit?'บันทึกการแก้ไข':'เพิ่มผู้ใช้งาน'}</button>
   </div>`;
 }
 function toggleAdvisorField(){
@@ -1333,6 +1368,8 @@ async function submitUserForm(mode, userId){
   const password = document.getElementById('f-password').value;
   if(!name || !email){ alert('กรุณากรอกชื่อและอีเมลให้ครบถ้วน'); return; }
   if(!username) username = usernameFromEmail(email);
+  const btn = document.getElementById('modal-submit-btn');
+  setBtnLoading(btn, true);
   try{
     if(mode==='add'){
       const advisorId = role==='student' ? document.getElementById('f-advisor').value : null;
@@ -1353,7 +1390,7 @@ async function submitUserForm(mode, userId){
     }
     await refreshAppState();
     closeModal();
-  }catch(e){ alert(e.message); }
+  }catch(e){ setBtnLoading(btn, false); alert(e.message); }
 }
 async function deleteUser(userId){
   const u = DB.users.find(x=>x.id===userId);
@@ -1396,7 +1433,7 @@ function modalMyAccount(){
       <label class="text-xs text-slate-500 font-medium">ยืนยันรหัสผ่านใหม่</label>
       <input id="acc-password2" type="password" placeholder="กรอกรหัสผ่านใหม่อีกครั้ง" onkeydown="if(event.key==='Enter') submitMyAccount('${user.id}')" class="w-full mt-1 glass-btn rounded-xl px-3 py-2.5 text-sm text-slate-700">
     </div>
-    <button onclick="submitMyAccount('${user.id}')" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">บันทึกการเปลี่ยนแปลง</button>
+    <button id="modal-submit-btn" onclick="submitMyAccount('${user.id}')" class="tap w-full py-3 rounded-2xl text-white font-semibold bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg mt-2">บันทึกการเปลี่ยนแปลง</button>
   </div>`;
 }
 async function submitMyAccount(userId){
@@ -1408,12 +1445,14 @@ async function submitMyAccount(userId){
     if(pwd1 !== pwd2){ alert('รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน'); return; }
     if(pwd1.length < 4){ alert('รหัสผ่านใหม่ควรมีความยาวอย่างน้อย 4 ตัวอักษร'); return; }
   }
+  const btn = document.getElementById('modal-submit-btn');
+  setBtnLoading(btn, true);
   try{
     await callRpc('update_my_account', {p_token:TOKEN, p_username:username, p_new_password: pwd1 || null});
     ME.username = username;
     closeModal();
     alert('บันทึกข้อมูลบัญชีเรียบร้อยแล้ว');
-  }catch(e){ alert(e.message); }
+  }catch(e){ setBtnLoading(btn, false); alert(e.message); }
 }
 
 function toggleCategory(catId){ state.expandedCategoryId = state.expandedCategoryId===catId ? null : catId; render(); }

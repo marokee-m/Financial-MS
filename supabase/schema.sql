@@ -533,8 +533,8 @@ begin
   if p_role = 'student' then
     insert into public.accounts (student_id, name, type) values (v_id, 'บัญชีเงินสด', 'cash');
     insert into public.expense_categories (student_id, name, icon, locked) values
-      (v_id,'ค่ากินอยู่รายวัน','🍜',true), (v_id,'ค่าน้ำมันรถ','⛽',true), (v_id,'ค่าน้ำค่าไฟ','💡',true),
-      (v_id,'ค่าเล่าเรียน','🎓',true), (v_id,'ค่าผ่อนรายเดือน','💳',true), (v_id,'ค่าเน็ท/บริการต่างๆ','📶',true);
+      (v_id,'ค่ากินค่าใช้รายวัน','🍜',true), (v_id,'ค่าน้ำมันรถ','⛽',true), (v_id,'ค่าน้ำค่าไฟ','💡',true),
+      (v_id,'ค่าอุปกรณ์การเรียน','🎓',true), (v_id,'ค่าผ่อนรายเดือน','💳',true), (v_id,'ค่าเน็ท/บริการต่างๆ','📶',true);
     insert into public.income_categories (student_id, name, icon, locked) values
       (v_id,'เงินเดือน','💰',true), (v_id,'รายได้เสริม','➕',true);
   end if;
